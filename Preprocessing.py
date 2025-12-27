@@ -4,13 +4,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn. linear_model import LogisticRegressionCV
+from sklearn.feature_selection import SelectKBest, mutual_info_classif
 
 class BotDetector:
     def __init__(self, data_path):
         self.data_path = data_path
         self.model = None
-        self.scaler = StandardScaler()
+        self. scaler = StandardScaler()
+        self.selected_features = None
+        self.feature_selector = None
 
     def load_data(self) -> pd.DataFrame:
         self.data = pd.read_csv(self.data_path)
@@ -22,14 +25,15 @@ class BotDetector:
         self.data = self.data.fillna(0)
         
         #normalise the text fields
-        if 'description' in self.data.columns:
+        if 'description' in self.data. columns:
             self.data['description'] = self.data['description'].str.lower()
         return self.data
+
     def split_data(self, test_size: float = 0.1, val_size: float = 0.2):
         """Will split into train/val/test sets (70:20:10 ratio)"""
         X = self.data.drop('label', axis=1)
         # Ensure that only numeric features are passed to the model
-        X = X.select_dtypes(include=[np.number])
+        X = X. select_dtypes(include=[np.number])
         y = self.data['label']
         # First split: to separate test set (10%)
         X_temp, X_test, y_temp, y_test = train_test_split(
@@ -41,4 +45,54 @@ class BotDetector:
             X_temp, y_temp, test_size=val_ratio, random_state=2112
         )
         return X_train, X_val, X_test, y_train, y_val, y_test
-   
+
+    def scale_features(self, X_train, X_val, X_test):
+        """Apply StandardScaler for Logistic Regression and SVM models"""
+        X_train_scaled = self.scaler.fit_transform(X_train)
+        X_val_scaled = self. scaler.transform(X_val)
+        X_test_scaled = self.scaler.transform(X_test)
+        return X_train_scaled, X_val_scaled, X_test_scaled
+
+    def handle_imbalance(self, X_train, y_train, method:  str = 'smote'):
+        """Handle class imbalance in bot detection datasets"""
+        if method == 'smote':
+            try:
+                from imblearn.over_sampling import SMOTE
+                smote = SMOTE(random_state=2112)
+                X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+                return X_resampled, y_resampled
+            except ImportError:
+                print("imblearn not installed.  Install with: pip install imbalanced-learn")
+                return X_train, y_train
+        elif method == 'undersample':
+            try:
+                from imblearn.under_sampling import RandomUnderSampler
+                rus = RandomUnderSampler(random_state=2112)
+                X_resampled, y_resampled = rus.fit_resample(X_train, y_train)
+                return X_resampled, y_resampled
+            except ImportError:
+                print("imblearn not installed. Install with: pip install imbalanced-learn")
+                return X_train, y_train
+        return X_train, y_train
+
+    def select_features(self, X_train, y_train, k:  int = 20):
+        """Select top k features using mutual information"""
+        # Ensure k does not exceed number of features
+        k = min(k, X_train.shape[1])
+        self.feature_selector = SelectKBest(mutual_info_classif, k=k)
+        X_selected = self.feature_selector.fit_transform(X_train, y_train)
+        self.selected_features = self.feature_selector.get_support(indices=True)
+        return X_selected
+
+    def apply_feature_selection(self, X):
+        """Apply previously fitted feature selection to new data"""
+        if self.feature_selector is None:
+            raise ValueError("Feature selector not fitted. Call select_features first.")
+        return self.feature_selector.transform(X)
+
+    def get_class_weights(self, y_train) -> dict:
+        """Calculate class weights for handling imbalance in model training"""
+        class_counts = np.bincount(y_train. astype(int))
+        total = len(y_train)
+        weights = {i: total / (len(class_counts) * count) for i, count in enumerate(class_counts)}
+        return weights
