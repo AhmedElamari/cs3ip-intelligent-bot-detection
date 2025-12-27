@@ -25,17 +25,17 @@ class BotDetector:
         if 'description' in self.data.columns:
             self.data['description'] = self.data['description'].str.lower()
         return self.data
-    def split_data(self, test_size: float = 0.2, val_size: float = 0.1):
-        """Will split into train/val/test sets"""
+    def split_data(self, test_size: float = 0.1, val_size: float = 0.2):
+        """Will split into train/val/test sets (70:20:10 ratio)"""
         X = self.data.drop('label', axis=1)
         # Ensure that only numeric features are passed to the model
         X = X.select_dtypes(include=[np.number])
         y = self.data['label']
-        # First split: to separate test set
+        # First split: to separate test set (10%)
         X_temp, X_test, y_temp, y_test = train_test_split(
             X, y, test_size=test_size, random_state=2112
         )
-        # Second split: will separate validation set from training set
+        # Second split: will separate validation set from training set (20% of original = 2/9 of remaining)
         val_ratio = val_size / (1 - test_size)
         X_train, X_val, y_train, y_val = train_test_split(
             X_temp, y_temp, test_size=val_ratio, random_state=2112
