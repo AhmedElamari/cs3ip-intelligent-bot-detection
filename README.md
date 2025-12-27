@@ -162,22 +162,12 @@ This project serves as a foundation for:
 4. **Comparative Studies**: Benchmark interpretability methods across different model architectures
 5. **Interactive Visualization**: Build dashboards for exploring model decisions
 
-## Contributing
-
-Contributions are welcome! Areas of interest include:
-
-- New interpretable feature engineering techniques
-- Implementation of additional interpretability methods (SHAP, LIME, etc.)
-- Visualization tools for model explanations
-- Documentation and tutorials
-- Testing and validation frameworks
-
 ## Data Sources
 
 This project is designed to work with bot detection datasets such as:
 - **TwiBot-20**: A comprehensive Twitter bot detection benchmark
 - **Cresci-2017**: Classic bot detection dataset
-- Custom datasets with labeled bot/human accounts
+- **Twibot-22**: Comphrenesive test on evolution of automated accounts
 
 ## Dependencies
 
@@ -195,16 +185,6 @@ This project is designed to work with bot detection datasets such as:
 ## License
 
 This project is part of academic research at the University of Reading (CS3IP).
-
-## Acknowledgments
-
-- Dataset providers (TwiBot-20, Cresci, etc.)
-- Scikit-learn community for ML tools
-- Interpretability research community (SHAP, LIME developers)
-
-## Contact
-
-For questions or collaborations, please contact Ahmed Elamari at xe013680@student.reading.ac.uk
 
 ---
 
