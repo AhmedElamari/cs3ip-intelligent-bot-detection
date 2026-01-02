@@ -4,9 +4,9 @@ Bot Detection Benchmark Pipeline
 Main script to run comprehensive model benchmarking with XAI analysis.
 
 Usage:
-    python benchmark.py --data TwiBot-20_sample.json --labels labels.csv
-    python benchmark.py --data data.csv --config config/config.yaml
-    python benchmark.py --data data.csv --explain --save-plots
+    python benchmark.py --labels labels.csv
+    python benchmark.py --labels labels.csv --config config/config.yaml
+    python benchmark.py --labels labels.csv --explain --save-plots
 """
 
 import argparse
@@ -31,27 +31,24 @@ from models import (
 from benchmarking import ModelBenchmark, MetricsCalculator
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
 
+REPO_ROOT = Path(__file__).resolve().parent
+TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
 
-def load_data(data_path: str, label_path: str = None) -> pd.DataFrame:
-    """Load data from JSON or CSV file."""
-    path = Path(data_path)
-    
-    if path.suffix.lower() == '.json':
-        print(f"Loading JSON data from: {data_path}")
-        df = load_twibot_json(data_path, label_path)
-    else:
-        print(f"Loading CSV data from: {data_path}")
-        df = pd.read_csv(data_path)
-        
-        if label_path:
-            labels = pd.read_csv(label_path)
-            # Try to merge on common ID column
-            id_cols = ['user_id', 'ID', 'id']
-            for col in id_cols:
-                if col in df.columns and col in labels.columns:
-                    df = df.merge(labels[[col, 'label']], on=col, how='left')
-                    break
-    
+
+def resolve_twibot20_path() -> Path:
+    if not TWIBOT20_DATA_PATH.exists():
+        raise FileNotFoundError(
+            "TwiBot-20 dataset not found. Expected file at "
+            f"{TWIBOT20_DATA_PATH}"
+        )
+    return TWIBOT20_DATA_PATH
+
+
+def load_data(label_path: str = None) -> pd.DataFrame:
+    """Load TwiBot-20 JSON data."""
+    data_path = resolve_twibot20_path()
+    print(f"Loading TwiBot-20 JSON data from: {data_path}")
+    df = load_twibot_json(str(data_path), label_path)
     print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
     return df
 
@@ -315,16 +312,10 @@ def run_explainability_analysis(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Bot Detection Model Benchmarking Pipeline',
+        description='Bot Detection Model Benchmarking Pipeline (TwiBot-20 only)',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
-    parser.add_argument(
-        '--data', '-d',
-        type=str,
-        default='TwiBot-20_sample.json',
-        help='Path to data file (JSON or CSV)'
-    )
     parser.add_argument(
         '--labels', '-l',
         type=str,
@@ -401,12 +392,12 @@ def main():
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
     print("="*60)
-    print(f"Data:   {args.data}")
+    print(f"Data:   {resolve_twibot20_path()}")
     print(f"Output: {output_dir}")
     print(f"Models: {config.get_enabled_models()}")
     
     # Load data
-    df = load_data(args.data, args.labels)
+    df = load_data(args.labels)
     
     # Prepare data
     X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(df, config)
