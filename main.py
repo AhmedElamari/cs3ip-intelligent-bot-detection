@@ -129,7 +129,20 @@ def train_and_evaluate(
     print(f"  F1 Score:  {test_metrics['f1']:.4f}")
     
     print(f"\nClassification Report (Test):")
-    print(classification_report(y_test, y_test_pred, target_names=['Human', 'Bot']))
+    test_labels = np.unique(np.concatenate([y_test, y_test_pred]))
+    target_names = [
+        "Human" if lbl == 0 else "Bot" if lbl == 1 else str(lbl)
+        for lbl in test_labels
+    ]
+    print(
+        classification_report(
+            y_test,
+            y_test_pred,
+            labels=test_labels,
+            target_names=target_names,
+            zero_division=0
+        )
+    )
     
     print(f"\nConfusion Matrix (Test):")
     print(confusion_matrix(y_test, y_test_pred))
