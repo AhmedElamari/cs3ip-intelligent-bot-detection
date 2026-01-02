@@ -4,7 +4,7 @@
 This project implements an interpretable bot detection pipeline for social media data with an emphasis on explainability, reproducibility, and clean experimentation. It supports multiple supervised models, feature engineering grounded in domain knowledge, and benchmarking with XAI tooling (SHAP, LIME, feature importance).
 
 ## Key Capabilities
-- Structured data loading for TwiBot-20 style JSON and CSV
+- Structured data loading for TwiBot-20 JSON
 - Feature engineering with leakage-aware account age computation
 - Train/validation/test splits with reproducible random state
 - Multiple supervised models with a common interface
@@ -48,12 +48,12 @@ pip install shap lime matplotlib seaborn
 
 ## Quickstart
 Example files assumed:
-- `TwiBot-20_sample.json`
-- `labels.csv` (columns: `ID` or `id` and `label`)
+- `TwiBot-20_sample.json` (fixed dataset path in the repo root)
+- `labels.csv` (columns: `ID`, `id`, or `user_id` plus `label`)
 
 Run a single model:
 ```bash
-python main.py --data TwiBot-20_sample.json --labels labels.csv --model random_forest
+python main.py --labels labels.csv --model random_forest
 ```
 Expected output (console):
 - Training/validation/test sizes
@@ -62,7 +62,7 @@ Expected output (console):
 
 Run a benchmark with explainability:
 ```bash
-python benchmark.py --data TwiBot-20_sample.json --labels labels.csv --explain --save-plots
+python benchmark.py --labels labels.csv --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -72,7 +72,7 @@ Expected output (filesystem):
 
 ### Single Model Pipeline
 ```bash
-python main.py --data TwiBot-20_sample.json --labels labels.csv --model random_forest
+python main.py --labels labels.csv --model random_forest
 ```
 
 Options:
@@ -83,7 +83,7 @@ Options:
 
 ### Benchmarking and Explainability
 ```bash
-python benchmark.py --data TwiBot-20_sample.json --labels labels.csv --explain --save-plots
+python benchmark.py --labels labels.csv --explain --save-plots
 ```
 
 Options:
@@ -97,7 +97,9 @@ Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.
 
 ## Data Notes
-- If labels are missing, the pipeline will synthesize labels for demo purposes.
+- The pipeline is currently locked to the bundled `TwiBot-20_sample.json`.
+- If `--labels` is omitted, the pipeline synthesizes labels for demo purposes.
+- If `--labels` is provided but the file is missing or IDs do not match, the run fails with a clear error.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
