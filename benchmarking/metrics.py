@@ -73,7 +73,7 @@ class MetricsCalculator:
         metrics['f1'] = f1_score(y_true, y_pred, average='binary', zero_division=0)
         
         # Confusion matrix derived
-        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
         metrics['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0
         metrics['false_positive_rate'] = fp / (fp + tn) if (fp + tn) > 0 else 0
         metrics['false_negative_rate'] = fn / (fn + tp) if (fn + tp) > 0 else 0

@@ -67,4 +67,7 @@ class SVMModel(BaseModel):
         decision boundary is complex.
         """
         self._check_fitted()
-        return len(self.model.support_) / self.model.n_features_in_
+        if not hasattr(self.model, 'shape_fit_'):
+            raise RuntimeError("Training sample count not available on the fitted model.")
+        n_samples = self.model.shape_fit_[0]
+        return len(self.model.support_) / n_samples

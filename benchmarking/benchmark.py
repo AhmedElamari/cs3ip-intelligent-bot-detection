@@ -49,6 +49,8 @@ class ModelBenchmark:
         self.training_times: Dict[str, float] = {}
         self.predictions: Dict[str, np.ndarray] = {}
         self.probabilities: Dict[str, np.ndarray] = {}
+        self.y_val: Optional[np.ndarray] = None
+        self.y_test: Optional[np.ndarray] = None
     
     def add_model(self, name: str, model: Any) -> 'ModelBenchmark':
         """
@@ -99,6 +101,9 @@ class ModelBenchmark:
             print(f"Validation samples: {len(X_val)}")
             print(f"Test samples: {len(X_test)}")
             print(f"Features: {X_train.shape[1]}")
+        
+        self.y_val = y_val
+        self.y_test = y_test
         
         for name, model in self.models.items():
             if verbose:
@@ -381,26 +386,15 @@ class ModelBenchmark:
         
         for (name, proba), color in zip(self.probabilities.items(), colors):
             if proba is not None:
-                y_test = None
-                for model_name, result in self.results.items():
-                    if model_name == name:
-                        # Need to get y_test from somewhere - using stored predictions
-                        break
-                
                 # Get probabilities for positive class
                 y_proba = proba[:, 1] if len(proba.shape) > 1 else proba
                 
-                # We need true labels - this is a limitation
-                # For now, skip if we can't compute
-                try:
-                    auc = self.results[name]['test_metrics'].get('roc_auc', 0)
-                    fpr, tpr, _ = roc_curve(
-                        self.predictions[name],  # This won't work correctly
-                        y_proba
-                    )
-                    ax.plot(fpr, tpr, color=color, label=f'{name} (AUC={auc:.3f})')
-                except:
-                    pass
+                if self.y_test is None:
+                    raise RuntimeError("y_test not available. Run run_benchmark() first.")
+                
+                auc = self.results[name]['test_metrics'].get('roc_auc', 0)
+                fpr, tpr, _ = roc_curve(self.y_test, y_proba)
+                ax.plot(fpr, tpr, color=color, label=f'{name} (AUC={auc:.3f})')
         
         ax.plot([0, 1], [0, 1], 'k--', label='Random')
         ax.set_xlabel('False Positive Rate')
