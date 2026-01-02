@@ -98,7 +98,7 @@ class TwiBotDataLoader:
             'real': 0,
         }
         mapped = normalized.map(label_map)
-        numeric = pd.to_numeric(series, errors='coerce')
+        numeric = pd.to_numeric(normalized, errors='coerce')
         return mapped.fillna(numeric)
 
     def _validate_label_values(self, series: pd.Series) -> None:
