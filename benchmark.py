@@ -16,6 +16,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 # Project imports
 from DataLoader import load_twibot_json
@@ -68,27 +69,61 @@ def prepare_data(df: pd.DataFrame, config: Config) -> tuple:
         np.random.seed(config.get('random_state'))
         df['label'] = np.random.randint(0, 2, size=len(df))
     
+    df = df.dropna(subset=['label'])
+    
+    random_state = config.get('random_state')
+    test_size = config.get('test_size', 0.1)
+    val_size = config.get('val_size', 0.2)
+    
+    # Split indices first to avoid leakage when deriving reference dates
+    indices = df.index.to_numpy()
+    labels = df['label'].to_numpy()
+    idx_temp, idx_test, labels_temp, _ = train_test_split(
+        indices, labels, test_size=test_size, random_state=random_state
+    )
+    val_ratio = val_size / (1 - test_size)
+    idx_train, idx_val, _, _ = train_test_split(
+        idx_temp, labels_temp, test_size=val_ratio, random_state=random_state
+    )
+    
     # Feature engineering
     print("\nExtracting features...")
-    extractor = BotFeatureExtractor()
+    reference_date = None
+    if 'account_creation_date' in df.columns:
+        account_creation = pd.to_datetime(
+            df.loc[idx_train, 'account_creation_date'], errors='coerce'
+        )
+        if account_creation.notna().any():
+            reference_date = account_creation.max()
+        else:
+            full_account_creation = pd.to_datetime(
+                df['account_creation_date'], errors='coerce'
+            )
+            reference_date = pd.Timestamp.utcnow()
+            if full_account_creation.dt.tz is not None:
+                reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
+    extractor = BotFeatureExtractor(reference_date=reference_date)
     df = extractor.extract_all_features(df)
-    feature_names = extractor.get_feature_names()
-    print(f"Extracted {len(feature_names)} features")
+    print(f"Extracted {len(extractor.get_feature_names())} features")
     
     # Preprocessing
     print("\nPreprocessing...")
     detector = BotDetector()
     detector.data = df
-    detector.preprocess()
+    df = detector.preprocess()
     
     # Split data
-    test_size = config.get('test_size', 0.1)
-    val_size = config.get('val_size', 0.2)
     print(f"\nSplitting data (train/val/test: {(1-test_size-val_size)*100:.0f}%/{val_size*100:.0f}%/{test_size*100:.0f}%)...")
-    
-    X_train, X_val, X_test, y_train, y_val, y_test = detector.split_data(
-        test_size=test_size, val_size=val_size
+    feature_names = (
+        df.drop(columns=['label'])
+        .select_dtypes(include=[np.number])
+        .columns
+        .tolist()
     )
+    X = df[feature_names]
+    y = df['label']
+    X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
+    y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
     
     # Handle imbalance if configured
     if config.get('preprocessing.handle_imbalance'):

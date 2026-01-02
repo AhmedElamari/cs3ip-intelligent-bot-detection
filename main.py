@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
@@ -153,18 +154,53 @@ def run_pipeline(
         df['label'] = np.random.randint(0, 2, size=len(df))
         print(f"Created synthetic labels: {df['label'].value_counts().to_dict()}")
     
+    df = df.dropna(subset=['label'])
+    
+    indices = df.index.to_numpy()
+    labels = df['label'].to_numpy()
+    idx_temp, idx_test, labels_temp, _ = train_test_split(
+        indices, labels, test_size=0.1, random_state=2112
+    )
+    val_ratio = 0.2 / (1 - 0.1)
+    idx_train, idx_val, _, _ = train_test_split(
+        idx_temp, labels_temp, test_size=val_ratio, random_state=2112
+    )
+    
     # Step 2: Feature engineering
-    df = engineer_features(df)
+    reference_date = None
+    if 'account_creation_date' in df.columns:
+        account_creation = pd.to_datetime(
+            df.loc[idx_train, 'account_creation_date'], errors='coerce'
+        )
+        if account_creation.notna().any():
+            reference_date = account_creation.max()
+        else:
+            full_account_creation = pd.to_datetime(
+                df['account_creation_date'], errors='coerce'
+            )
+            reference_date = pd.Timestamp.utcnow()
+            if full_account_creation.dt.tz is not None:
+                reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
+    df = engineer_features(df, reference_date=reference_date)
     
     # Step 3: Preprocessing
     print("\nPreprocessing data...")
     detector = BotDetector()
     detector.data = df
-    detector.preprocess()
+    df = detector.preprocess()
     
     # Step 4: Split data
     print("\nSplitting data (70% train, 20% validation, 10% test)...")
-    X_train, X_val, X_test, y_train, y_val, y_test = detector.split_data()
+    feature_names = (
+        df.drop(columns=['label'])
+        .select_dtypes(include=[np.number])
+        .columns
+        .tolist()
+    )
+    X = df[feature_names]
+    y = df['label']
+    X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
+    y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
     
     print(f"Training set:   {len(X_train)} samples")
     print(f"Validation set: {len(X_val)} samples")
