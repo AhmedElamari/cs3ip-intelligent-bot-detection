@@ -2,7 +2,7 @@
 Bot Detection Pipeline
 ======================
 Main script to run the complete bot detection pipeline:
-JSON loading → Feature engineering → Preprocessing → Model training → Evaluation
+JSON loading -> Feature engineering -> Preprocessing -> Model training -> Evaluation
 """
 
 import argparse
@@ -22,10 +22,24 @@ from DataLoader import TwiBotDataLoader, load_twibot_json
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 
+REPO_ROOT = Path(__file__).resolve().parent
+TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
+
+
+def resolve_twibot20_path() -> Path:
+    if not TWIBOT20_DATA_PATH.exists():
+        raise FileNotFoundError(
+            "TwiBot-20 dataset not found. Expected file at "
+            f"{TWIBOT20_DATA_PATH}"
+        )
+    return TWIBOT20_DATA_PATH
+
 
 def load_and_prepare_data(json_path: str, label_path: str = None) -> pd.DataFrame:
     """Load JSON data and prepare it for processing."""
     print(f"Loading data from: {json_path}")
+    if label_path:
+        print(f"Loading labels from: {label_path}")
     
     loader = TwiBotDataLoader(json_path, label_path)
     df = loader.load()
@@ -128,25 +142,31 @@ def train_and_evaluate(
 
 
 def run_pipeline(
-    json_path: str,
     label_path: str = None,
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
     num_features: int = None
 ):
-    """Run the complete bot detection pipeline."""
+    """Run the complete bot detection pipeline on TwiBot-20."""
     
     print("=" * 60)
     print("BOT DETECTION PIPELINE")
     print("=" * 60)
     
     # Step 1: Load data
-    df = load_and_prepare_data(json_path, label_path)
+    json_path = resolve_twibot20_path()
+    print(f"Using TwiBot-20 dataset: {json_path}")
+    df = load_and_prepare_data(str(json_path), label_path)
     
     # Check if labels exist
     if 'label' not in df.columns:
-        print("\n⚠️  WARNING: No 'label' column found in data.")
+        if label_path:
+            raise ValueError(
+                "Labels file was provided but no 'label' column was found "
+                "after loading. Check the labels file and ID column mapping."
+            )
+        print("\nWARNING: No 'label' column found in data.")
         print("Please provide a labels file with --labels argument.")
         print("For demo purposes, creating synthetic labels...")
         # Create synthetic labels for demo (random)
@@ -155,6 +175,11 @@ def run_pipeline(
         print(f"Created synthetic labels: {df['label'].value_counts().to_dict()}")
     
     df = df.dropna(subset=['label'])
+    if df.empty:
+        raise ValueError(
+            "No labeled records available after loading labels. "
+            "Check that label IDs match the TwiBot IDs."
+        )
     
     indices = df.index.to_numpy()
     labels = df['label'].to_numpy()
@@ -244,12 +269,8 @@ def run_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Bot Detection Pipeline')
-    parser.add_argument(
-        '--data', '-d',
-        type=str,
-        default='TwiBot-20_sample.json',
-        help='Path to TwiBot-20 JSON file'
+    parser = argparse.ArgumentParser(
+        description='Bot Detection Pipeline (TwiBot-20 only)'
     )
     parser.add_argument(
         '--labels', '-l',
@@ -284,7 +305,6 @@ def main():
     args = parser.parse_args()
     
     run_pipeline(
-        json_path=args.data,
         label_path=args.labels,
         model_type=args.model,
         use_smote=args.smote,
