@@ -22,6 +22,18 @@ from DataLoader import TwiBotDataLoader, load_twibot_json
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 
+REPO_ROOT = Path(__file__).resolve().parent
+TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
+
+
+def resolve_twibot20_path() -> Path:
+    if not TWIBOT20_DATA_PATH.exists():
+        raise FileNotFoundError(
+            "TwiBot-20 dataset not found. Expected file at "
+            f"{TWIBOT20_DATA_PATH}"
+        )
+    return TWIBOT20_DATA_PATH
+
 
 def load_and_prepare_data(json_path: str, label_path: str = None) -> pd.DataFrame:
     """Load JSON data and prepare it for processing."""
@@ -128,21 +140,22 @@ def train_and_evaluate(
 
 
 def run_pipeline(
-    json_path: str,
     label_path: str = None,
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
     num_features: int = None
 ):
-    """Run the complete bot detection pipeline."""
+    """Run the complete bot detection pipeline on TwiBot-20."""
     
     print("=" * 60)
     print("BOT DETECTION PIPELINE")
     print("=" * 60)
     
     # Step 1: Load data
-    df = load_and_prepare_data(json_path, label_path)
+    json_path = resolve_twibot20_path()
+    print(f"Using TwiBot-20 dataset: {json_path}")
+    df = load_and_prepare_data(str(json_path), label_path)
     
     # Check if labels exist
     if 'label' not in df.columns:
@@ -244,12 +257,8 @@ def run_pipeline(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Bot Detection Pipeline')
-    parser.add_argument(
-        '--data', '-d',
-        type=str,
-        default='TwiBot-20_sample.json',
-        help='Path to TwiBot-20 JSON file'
+    parser = argparse.ArgumentParser(
+        description='Bot Detection Pipeline (TwiBot-20 only)'
     )
     parser.add_argument(
         '--labels', '-l',
@@ -284,7 +293,6 @@ def main():
     args = parser.parse_args()
     
     run_pipeline(
-        json_path=args.data,
         label_path=args.labels,
         model_type=args.model,
         use_smote=args.smote,
