@@ -67,6 +67,11 @@ def prepare_data(df: pd.DataFrame, config: Config) -> tuple:
         df['label'] = np.random.randint(0, 2, size=len(df))
     
     df = df.dropna(subset=['label'])
+    if df.empty:
+        raise ValueError(
+            "No labeled records available after loading labels. "
+            "Check that label IDs match the TwiBot IDs."
+        )
     
     random_state = config.get('random_state')
     test_size = config.get('test_size', 0.1)
