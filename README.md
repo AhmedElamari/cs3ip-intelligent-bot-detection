@@ -1,191 +1,111 @@
-# CS3IP: Intelligent Bot Detection - Interpretable Machine Learning
+# CS3IP: Intelligent Bot Detection - Interpretable ML
 
-## Project Overview
+## Overview
+This project implements an interpretable bot detection pipeline for social media data with an emphasis on explainability, reproducibility, and clean experimentation. It supports multiple supervised models, feature engineering grounded in domain knowledge, and benchmarking with XAI tooling (SHAP, LIME, feature importance).
 
-This project investigates and implements interpretable machine learning approaches for bot detection on social media platforms. The primary goal is to **make black box models more interpretable** for learning, understanding, and predicting how bots could possibly evolve. By bridging the gap between model performance and human understanding, this research aims to provide insights into bot behavior patterns and inform future detection strategies.
+## Key Capabilities
+- Structured data loading for TwiBot-20 style JSON and CSV
+- Feature engineering with leakage-aware account age computation
+- Train/validation/test splits with reproducible random state
+- Multiple supervised models with a common interface
+- Benchmarking with comparison tables and plots
+- Explainability using SHAP, LIME, and feature importance analysis
 
-## Project Goals
-
-1. **Model Interpretability**: Transform black box machine learning models into transparent, explainable systems that reveal decision-making processes
-2. **Bot Evolution Understanding**: Identify and analyze features that distinguish bots from humans to anticipate how bot behavior may evolve
-3. **Learning and Research**: Provide a foundation for understanding bot detection mechanisms and their implications for social media security
-4. **Predictive Insights**: Enable researchers and practitioners to understand not just *if* an account is a bot, but *why* and *how* the model makes that determination
-
-## Why Interpretability Matters
-
-Bot detection systems traditionally operate as black boxes, making accurate predictions without explaining their reasoning. This project addresses critical needs:
-
-- **Trust and Verification**: Stakeholders need to understand and validate model decisions
-- **Feature Discovery**: Interpretability reveals which characteristics are most indicative of bot behavior
-- **Adversarial Resilience**: Understanding model decisions helps predict how bots might adapt to evade detection
-- **Regulatory Compliance**: Many domains require explainable AI for accountability and transparency
-
-## Approach
-
-This project employs a structured pipeline for interpretable bot detection:
-
-### 1. Data Preprocessing (`Preprocessing.py`)
-- **Data Loading**: Ingests bot detection datasets (e.g., TwiBot-20)
-- **Cleaning**: Handles missing values and normalizes text fields
-- **Data Splitting**: Creates reproducible train/validation/test splits
-- **Feature Selection**: Isolates numeric features for model training
-- **Standardization**: Applies scaling for consistent feature magnitudes
-
-### 2. Feature Engineering (`FeatureEngineering.py`)
-- **Account-Based Features**: Extracts interpretable characteristics such as:
-  - Account age (days since creation)
-  - Verification status
-  - Additional temporal and behavioral features
-- **Reproducibility**: Uses fixed reference dates to prevent data leakage
-- **Domain Knowledge**: Incorporates features based on known bot behavior patterns
-
-### 3. Model Training and Interpretability
-The system supports multiple model types with varying interpretability:
-- **Random Forest**: Provides feature importance rankings
-- **Logistic Regression**: Offers coefficient-based interpretability
-- **Future Extensions**: SHAP values, LIME, decision tree visualization
+## Project Structure
+```
+cs3ip-intelligent-bot-detection/
+|-- DataLoader.py                 # TwiBot-20 JSON loader and flattening
+|-- FeatureEngineering.py         # Feature extraction
+|-- Preprocessing.py              # Cleaning and split helpers
+|-- main.py                       # Single-model pipeline
+|-- benchmark.py                  # Multi-model benchmark + XAI
+|-- config/
+|   |-- config.py                 # Config management
+|-- models/                       # Model implementations
+|-- benchmarking/                 # Benchmark runner and metrics
+|-- explainability/               # SHAP/LIME/feature importance tools
+|-- tests/                        # Smoke tests
+|-- results/                      # Generated outputs (gitignored)
+```
 
 ## Installation
-
+Recommended:
 ```bash
-# Clone the repository
-git clone https://github.com/AhmedElamari/cs3ip-intelligent-bot-detection.git
-cd cs3ip-intelligent-bot-detection
+pip install -r requirements.txt
+```
 
-# Install required dependencies
+Minimum:
+```bash
 pip install pandas numpy scikit-learn
+```
 
-# Optional: Install interpretability tools
+Optional XAI tooling:
+```bash
 pip install shap lime matplotlib seaborn
 ```
 
 ## Usage
 
-### Basic Bot Detection Pipeline
+## Quickstart
+Example files assumed:
+- `TwiBot-20_sample.json`
+- `labels.csv` (columns: `ID` or `id` and `label`)
 
-```python
-from Preprocessing import BotDetector
-from FeatureEngineering import BotFeatureExtractor
+Run a single model:
+```bash
+python main.py --data TwiBot-20_sample.json --labels labels.csv --model random_forest
+```
+Expected output (console):
+- Training/validation/test sizes
+- Validation + test metrics
+- Confusion matrix and classification report
 
-# Initialize the detector
-detector = BotDetector('path/to/your/data.csv')
+Run a benchmark with explainability:
+```bash
+python benchmark.py --data TwiBot-20_sample.json --labels labels.csv --explain --save-plots
+```
+Expected output (filesystem):
+- `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
+- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt`
+- `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
 
-# Load and preprocess data
-data = detector.load_data()
-data = detector.preprocess()
-
-# Extract interpretable features
-feature_extractor = BotFeatureExtractor()
-data = feature_extractor.extract_account_features(data)
-
-# Split data for training
-X_train, X_val, X_test, y_train, y_val, y_test = detector.split_data()
-
-# Train your model (example using existing components)
-# Additional training code can be implemented based on specific needs
+### Single Model Pipeline
+```bash
+python main.py --data TwiBot-20_sample.json --labels labels.csv --model random_forest
 ```
 
-### Feature Extraction Example
+Options:
+- `--model`: `random_forest`, `logistic_regression`, `svm`
+- `--smote`: enable SMOTE
+- `--scale`: enable feature scaling
+- `--features`: select top-k features
 
-```python
-import pandas as pd
-from FeatureEngineering import BotFeatureExtractor
-
-# Load your dataset
-df = pd.read_csv('bot_data.csv')
-
-# Initialize with a fixed reference date for reproducibility
-extractor = BotFeatureExtractor(reference_date=pd.Timestamp('2024-01-01'))
-
-# Extract features
-df_with_features = extractor.extract_account_features(df)
-
-# View extracted feature names
-print(extractor.feature_names)
+### Benchmarking and Explainability
+```bash
+python benchmark.py --data TwiBot-20_sample.json --labels labels.csv --explain --save-plots
 ```
 
-## Project Structure
+Options:
+- `--config`: load YAML or JSON config
+- `--models`: specify models to run
+- `--smote` / `--scale`: override preprocessing settings
 
+Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
+
+## Configuration
+Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.
+
+## Data Notes
+- If labels are missing, the pipeline will synthesize labels for demo purposes.
+- Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
+- Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
+
+## Testing
+```bash
+python -m unittest discover -s tests -v
 ```
-cs3ip-intelligent-bot-detection/
-├── Preprocessing.py          # Data loading, cleaning, and splitting
-├── FeatureEngineering.py     # Feature extraction for interpretability
-└── README.md                 # Project documentation (this file)
-```
-
-## Key Features
-
-### Implemented
-- ✅ Reproducible data preprocessing pipeline
-- ✅ Feature engineering with domain knowledge
-- ✅ Train/validation/test split methodology
-- ✅ Support for multiple model types (Random Forest, Logistic Regression)
-- ✅ Temporal feature extraction (account age)
-- ✅ Binary feature encoding (verification status)
-
-### Planned for Interpretability
-- 🔄 SHAP (SHapley Additive exPlanations) value analysis
-- 🔄 LIME (Local Interpretable Model-agnostic Explanations)
-- 🔄 Feature importance visualization
-- 🔄 Decision tree rule extraction
-- 🔄 Partial dependence plots
-- 🔄 Individual prediction explanations
-
-## Understanding Bot Evolution
-
-This project provides insights into potential bot evolution pathways:
-
-1. **Feature Importance Analysis**: Identifies which characteristics are most predictive
-2. **Temporal Patterns**: Tracks how bot behaviors change over time
-3. **Adversarial Awareness**: Highlights features bots might manipulate to evade detection
-4. **Emerging Patterns**: Enables discovery of new bot strategies through interpretable models
-
-### Examples of Evolutionary Insights
-- If "account age" is highly important, bots may shift to using older compromised accounts
-- If "verification status" is critical, bot operators may focus on obtaining verified badges
-- Understanding feature interactions reveals complex evasion strategies
-
-## Research and Learning Opportunities
-
-This project serves as a foundation for:
-
-- **Academic Research**: Studying interpretability in adversarial ML contexts
-- **Security Research**: Understanding bot behavior and detection mechanisms
-- **ML Education**: Learning about feature engineering and model interpretability
-- **Industry Applications**: Developing explainable bot detection systems
-
-## Future Directions
-
-1. **Enhanced Feature Set**: Incorporate text analysis, network features, and behavioral patterns
-2. **Deep Learning Interpretability**: Extend to neural network interpretation (attention mechanisms, gradient-based methods)
-3. **Real-time Monitoring**: Track feature importance over time to detect bot adaptation
-4. **Comparative Studies**: Benchmark interpretability methods across different model architectures
-5. **Interactive Visualization**: Build dashboards for exploring model decisions
-
-## Data Sources
-
-This project is designed to work with bot detection datasets such as:
-- **TwiBot-20**: A comprehensive Twitter bot detection benchmark
-- **Cresci-2017**: Classic bot detection dataset
-- **Twibot-22**: Comphrenesive test on evolution of automated accounts
-
-## Dependencies
-
-- Python 3.8+
-- pandas
-- numpy
-- scikit-learn
-
-### Optional (for enhanced interpretability)
-- shap
-- lime
-- matplotlib
-- seaborn
+Smoke tests are dependency-aware and will skip when optional libraries are missing.
 
 ## License
-
-This project is part of academic research at the University of Reading (CS3IP).
-
----
-
-**Note**: This project prioritizes interpretability over raw performance. The goal is not just to detect bots accurately, but to understand *how* and *why* the detection works, enabling better predictions about bot evolution and more robust detection strategies.
+Academic research project (CS3IP, University of Reading).
