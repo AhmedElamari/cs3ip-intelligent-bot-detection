@@ -132,5 +132,15 @@ class BotDetector:
         """Calculate class weights for handling imbalance in model training"""
         class_counts = np.bincount(y_train.astype(int))
         total = len(y_train)
+        if total == 0:
+            raise ValueError("Cannot compute class weights: training labels are empty.")
+
+        missing_classes = [i for i, count in enumerate(class_counts) if count == 0]
+        if missing_classes:
+            raise ValueError(
+                f"Cannot compute class weights: no samples found for classes {missing_classes}. "
+                "Adjust the train/validation split or resampling strategy to include all classes."
+            )
+
         weights = {i: total / (len(class_counts) * count) for i, count in enumerate(class_counts)}
         return weights
