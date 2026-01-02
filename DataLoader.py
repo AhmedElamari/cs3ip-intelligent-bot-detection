@@ -108,7 +108,8 @@ class TwiBotDataLoader:
             raise ValueError(
                 "Labels file has no valid label values after normalization."
             )
-        if not valid_values.issubset({0, 1}):
+        # Accept both integer and float representations of 0 and 1 (e.g., 0, 1, 0.0, 1.0)
+        if not all((v == 0) or (v == 1) for v in valid_values):
             raise ValueError(
                 "Labels must be binary (0/1) after normalization."
             )
