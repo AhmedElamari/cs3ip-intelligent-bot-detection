@@ -198,7 +198,6 @@ class TwiBotDataLoader:
         """Merge labels into the flattened DataFrame."""
         id_col = self._get_label_id_column(self.labels)
         labels = self.labels[[id_col, 'label']].copy()
-        labels[id_col] = self._normalize_id_series(labels[id_col])
         df = df.merge(
             labels.rename(columns={id_col: 'user_id'}),
             on='user_id',
