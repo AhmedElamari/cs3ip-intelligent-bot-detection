@@ -49,7 +49,7 @@ pip install shap lime matplotlib seaborn
 ## Quickstart
 Example files assumed:
 - `TwiBot-20_sample.json` (fixed dataset path in the repo root)
-- `labels.csv` (columns: `ID` or `id` and `label`)
+- `labels.csv` (columns: `ID`, `id`, or `user_id` plus `label`)
 
 Run a single model:
 ```bash
@@ -98,7 +98,8 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 
 ## Data Notes
 - The pipeline is currently locked to the bundled `TwiBot-20_sample.json`.
-- If labels are missing, the pipeline will synthesize labels for demo purposes.
+- If `--labels` is omitted, the pipeline synthesizes labels for demo purposes.
+- If `--labels` is provided but the file is missing or IDs do not match, the run fails with a clear error.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 

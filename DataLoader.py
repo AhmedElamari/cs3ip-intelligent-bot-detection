@@ -22,6 +22,7 @@ class TwiBotDataLoader:
         'statuses_count', 'default_profile', 'default_profile_image',
         'has_extended_profile'
     ]
+    LABEL_ID_CANDIDATES = ('ID', 'id', 'user_id')
 
     def __init__(self, json_path: str, label_path: Optional[str] = None):
         """
@@ -29,7 +30,7 @@ class TwiBotDataLoader:
 
         Args:
             json_path: Path to the TwiBot-20 JSON file
-            label_path: Optional path to a separate labels file (CSV with ID, label columns)
+            label_path: Optional path to a separate labels file (CSV with ID/id/user_id and label columns)
         """
         self.json_path = Path(json_path)
         self.label_path = Path(label_path) if label_path else None
@@ -44,16 +45,73 @@ class TwiBotDataLoader:
 
     def load_labels(self) -> Optional[pd.DataFrame]:
         """Load labels from a separate file if provided."""
-        if self.label_path and self.label_path.exists():
-            self.labels = pd.read_csv(self.label_path)
-            return self.labels
-        return None
+        if not self.label_path:
+            return None
+        if not self.label_path.exists():
+            raise FileNotFoundError(
+                f"Labels file not found: {self.label_path}. "
+                "Provide a valid path with --labels."
+            )
+        self.labels = pd.read_csv(self.label_path)
+        if self.labels.empty:
+            raise ValueError(f"Labels file is empty: {self.label_path}")
+        if 'label' not in self.labels.columns:
+            raise ValueError(
+                "Labels file must include a 'label' column with 0/1 values."
+            )
+        id_col = self._get_label_id_column(self.labels)
+        self.labels = self.labels[[id_col, 'label']].copy()
+        self.labels[id_col] = self._normalize_id_series(self.labels[id_col])
+        self.labels['label'] = self._normalize_label_values(self.labels['label'])
+        self._validate_label_values(self.labels['label'])
+        return self.labels
 
     def _clean_string(self, value) -> str:
         """Clean string values by stripping whitespace."""
         if isinstance(value, str):
             return value.strip()
         return value
+
+    def _get_label_id_column(self, labels: pd.DataFrame) -> str:
+        """Find the ID column in a labels DataFrame."""
+        for candidate in self.LABEL_ID_CANDIDATES:
+            if candidate in labels.columns:
+                return candidate
+        raise ValueError(
+            "Labels file must include one of these ID columns: "
+            f"{', '.join(self.LABEL_ID_CANDIDATES)}"
+        )
+
+    def _normalize_id_series(self, series: pd.Series) -> pd.Series:
+        """Normalize ID values for reliable merging."""
+        return series.astype(str).str.strip()
+
+    def _normalize_label_values(self, series: pd.Series) -> pd.Series:
+        """Normalize label values to numeric 0/1 where possible."""
+        if pd.api.types.is_numeric_dtype(series):
+            return pd.to_numeric(series, errors='coerce')
+        normalized = series.astype(str).str.strip().str.lower()
+        label_map = {
+            'bot': 1,
+            'human': 0,
+            'fake': 1,
+            'real': 0,
+        }
+        mapped = normalized.map(label_map)
+        numeric = pd.to_numeric(series, errors='coerce')
+        return mapped.fillna(numeric)
+
+    def _validate_label_values(self, series: pd.Series) -> None:
+        """Ensure labels are binary after normalization."""
+        valid_values = set(series.dropna().unique())
+        if not valid_values:
+            raise ValueError(
+                "Labels file has no valid label values after normalization."
+            )
+        if not valid_values.issubset({0, 1}):
+            raise ValueError(
+                "Labels must be binary (0/1) after normalization."
+            )
 
     def _parse_twitter_date(self, date_str: str) -> Optional[pd.Timestamp]:
         """Parse Twitter's date format to pandas Timestamp."""
@@ -106,6 +164,8 @@ class TwiBotDataLoader:
 
         flattened = [self._flatten_user(user) for user in self.raw_data]
         df = pd.DataFrame(flattened)
+        if 'user_id' in df.columns:
+            df['user_id'] = self._normalize_id_series(df['user_id'])
 
         # Parse date column
         if 'account_creation_date' in df.columns:
@@ -125,25 +185,28 @@ class TwiBotDataLoader:
 
         # Merge labels if available
         if self.labels is not None:
-            # Try to match on ID column
-            id_col = 'ID' if 'ID' in self.labels.columns else 'id'
-            if id_col in self.labels.columns:
-                df = df.merge(
-                    self.labels[[id_col, 'label']].rename(columns={id_col: 'user_id'}),
-                    on='user_id',
-                    how='left'
-                )
+            df = self._merge_labels(df)
         elif self.label_path:
             self.load_labels()
             if self.labels is not None:
-                id_col = 'ID' if 'ID' in self.labels.columns else 'id'
-                if id_col in self.labels.columns:
-                    df = df.merge(
-                        self.labels[[id_col, 'label']].rename(columns={id_col: 'user_id'}),
-                        on='user_id',
-                        how='left'
-                    )
+                df = self._merge_labels(df)
 
+        return df
+
+    def _merge_labels(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Merge labels into the flattened DataFrame."""
+        id_col = self._get_label_id_column(self.labels)
+        labels = self.labels[[id_col, 'label']].copy()
+        labels[id_col] = self._normalize_id_series(labels[id_col])
+        df = df.merge(
+            labels.rename(columns={id_col: 'user_id'}),
+            on='user_id',
+            how='left'
+        )
+        if df['label'].notna().sum() == 0:
+            raise ValueError(
+                "Label merge produced zero matches. Check the ID column and format."
+            )
         return df
 
     def load(self) -> pd.DataFrame:
@@ -160,7 +223,7 @@ def load_twibot_json(json_path: str, label_path: Optional[str] = None) -> pd.Dat
 
     Args:
         json_path: Path to TwiBot-20 JSON file
-        label_path: Optional path to labels CSV file
+        label_path: Optional path to labels CSV file (ID/id/user_id and label)
 
     Returns:
         Flattened pandas DataFrame ready for preprocessing
