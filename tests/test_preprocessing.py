@@ -3,8 +3,6 @@ import sys
 import unittest
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -17,12 +15,14 @@ class PreprocessingTest(unittest.TestCase):
     def setUp(self):
         if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE):
             self.skipTest("Required dependencies not installed")
+        import numpy as np
         from Preprocessing import BotDetector
+        self.np = np
         self.detector = BotDetector()
 
     def test_get_class_weights_with_empty_labels_raises_value_error(self):
         """Verify ValueError is raised when y_train is empty."""
-        y_train = np.array([])
+        y_train = self.np.array([])
         
         with self.assertRaises(ValueError) as ctx:
             self.detector.get_class_weights(y_train)
@@ -34,7 +34,7 @@ class PreprocessingTest(unittest.TestCase):
 
     def test_get_class_weights_with_empty_labels_has_helpful_message(self):
         """Verify error message is helpful when y_train is empty."""
-        y_train = np.array([])
+        y_train = self.np.array([])
         
         with self.assertRaises(ValueError) as ctx:
             self.detector.get_class_weights(y_train)
@@ -48,7 +48,7 @@ class PreprocessingTest(unittest.TestCase):
         """Verify ValueError is raised when some classes have no samples."""
         # Create a training set with class 0 and 2, but missing class 1
         # This will cause bincount to return [count_0, 0, count_2]
-        y_train = np.array([0, 0, 2, 2])
+        y_train = self.np.array([0, 0, 2, 2])
         
         with self.assertRaises(ValueError) as ctx:
             self.detector.get_class_weights(y_train)
@@ -61,7 +61,7 @@ class PreprocessingTest(unittest.TestCase):
         """Verify error message is helpful when classes are missing."""
         # Create a training set with class 0 and 3, but missing classes 1 and 2
         # This will cause bincount to return [count_0, 0, 0, count_3]
-        y_train = np.array([0, 0, 3, 3, 3])
+        y_train = self.np.array([0, 0, 3, 3, 3])
         
         with self.assertRaises(ValueError) as ctx:
             self.detector.get_class_weights(y_train)
@@ -75,7 +75,7 @@ class PreprocessingTest(unittest.TestCase):
 
     def test_get_class_weights_with_balanced_classes(self):
         """Verify class weights are computed correctly for balanced classes."""
-        y_train = np.array([0, 0, 1, 1])
+        y_train = self.np.array([0, 0, 1, 1])
         
         weights = self.detector.get_class_weights(y_train)
         
@@ -86,7 +86,7 @@ class PreprocessingTest(unittest.TestCase):
     def test_get_class_weights_with_imbalanced_classes(self):
         """Verify class weights are computed correctly for imbalanced classes."""
         # 3 samples of class 0, 1 sample of class 1
-        y_train = np.array([0, 0, 0, 1])
+        y_train = self.np.array([0, 0, 0, 1])
         
         weights = self.detector.get_class_weights(y_train)
         
