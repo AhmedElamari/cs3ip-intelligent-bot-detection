@@ -50,7 +50,7 @@ pip install shap lime matplotlib seaborn
 Example files assumed:
 - `data/train.json`, `data/dev.json`, `data/test.json` (embedded labels)
 - Download the TwiBot-20 dataset from the official repository:
-  https://github.com/LuoUndergradXJ/TwiBot-20
+  https://github.com/BunsenFeng/TwiBot-20.git
 
 If you have a single JSON file instead of splits, pass it with `--data`.
 
