@@ -48,11 +48,17 @@ pip install shap lime matplotlib seaborn
 
 ## Quickstart
 Example files assumed:
-- `TwiBot-20_sample.json` (fixed dataset path in the repo root)
+- `data/train.json`, `data/dev.json`, `data/test.json` (embedded labels)
+
+If you have a single JSON file instead of splits, pass it with `--data`.
 
 Run a single model:
 ```bash
 python main.py --model random_forest
+```
+Or with a single JSON file:
+```bash
+python main.py --data path/to/twibot.json --model random_forest
 ```
 Expected output (console):
 - Training/validation/test sizes
@@ -62,6 +68,10 @@ Expected output (console):
 Run a benchmark with explainability:
 ```bash
 python benchmark.py --explain --save-plots
+```
+Or with a single JSON file:
+```bash
+python benchmark.py --data path/to/twibot.json --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -79,6 +89,7 @@ Options:
 - `--smote`: enable SMOTE
 - `--scale`: enable feature scaling
 - `--features`: select top-k features
+- `--data`: path to a single TwiBot-20 JSON file
 
 ### Benchmarking and Explainability
 ```bash
@@ -89,6 +100,7 @@ Options:
 - `--config`: load YAML or JSON config
 - `--models`: specify models to run
 - `--smote` / `--scale`: override preprocessing settings
+- `--data`: path to a single TwiBot-20 JSON file
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
@@ -96,9 +108,9 @@ Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.
 
 ## Data Notes
-- The pipeline is currently locked to the bundled `TwiBot-20_sample.json` or split files in `data/`.
-- Labels are expected to be embedded in the JSON data.
-- If labels are missing in the sample file, the pipeline synthesizes labels for demo purposes.
+- The pipeline expects TwiBot-20 JSON with labels embedded in the data.
+- Split files under `data/` (train/dev/test) are preferred when available.
+- If a single JSON file lacks labels, the pipeline synthesizes labels for demo purposes.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
