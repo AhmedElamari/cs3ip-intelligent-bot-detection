@@ -132,34 +132,6 @@ def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
     return None
 
 
-def _safe_stratified_split(
-    indices: np.ndarray,
-    labels: np.ndarray,
-    test_size: float,
-    random_state: int,
-    split_name: str
-):
-    try:
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=labels
-        )
-    except ValueError as exc:
-        print(
-            f"\n[WARNING] Stratified {split_name} split failed ({exc}). "
-            "Falling back to unstratified split."
-        )
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state
-        )
-
-
 def prepare_data(data, config: Config) -> tuple:
     """Prepare data: feature engineering, preprocessing, splitting.
     
@@ -259,20 +231,12 @@ def prepare_data(data, config: Config) -> tuple:
         # Split indices first to avoid leakage when deriving reference dates
         indices = df.index.to_numpy()
         labels = df['label'].to_numpy()
-        idx_temp, idx_test, labels_temp, _ = _safe_stratified_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state,
-            split_name="test"
+        idx_temp, idx_test, labels_temp, _ = train_test_split(
+            indices, labels, test_size=test_size, random_state=random_state
         )
         val_ratio = val_size / (1 - test_size)
-        idx_train, idx_val, _, _ = _safe_stratified_split(
-            idx_temp,
-            labels_temp,
-            test_size=val_ratio,
-            random_state=random_state,
-            split_name="validation"
+        idx_train, idx_val, _, _ = train_test_split(
+            idx_temp, labels_temp, test_size=val_ratio, random_state=random_state
         )
         
         # Feature engineering
@@ -585,14 +549,6 @@ def main():
         # Disable models not specified
         for model_name in config.get('models', {}).keys():
             config.set(f'models.{model_name}.enabled', model_name in args.models)
-
-    enabled_models = config.get_enabled_models()
-    if (
-        not config.get('preprocessing.scale_features')
-        and any(name in enabled_models for name in ('logistic_regression', 'svm'))
-    ):
-        print("\nEnabling feature scaling for logistic_regression/svm...")
-        config.set('preprocessing.scale_features', True)
     
     # Set up output directory
     output_dir = Path(args.output)
