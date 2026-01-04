@@ -117,6 +117,14 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
+## Data Download
+1) Download the TwiBot-20 dataset from:
+   https://github.com/LuoUndergradXJ/TwiBot-20
+2) Extract the archive.
+3) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
+
+The `data/` folder is gitignored, so these files stay local and will not be committed.
+
 ## Testing
 ```bash
 python -m unittest discover -s tests -v
