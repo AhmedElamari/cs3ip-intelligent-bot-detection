@@ -30,6 +30,11 @@ class GradientBoostingModel(BaseModel):
         - Slower training due to sequential nature
         - Sensitive to hyperparameters
         - Can overfit with too many trees
+
+    Notes:
+        GradientBoostingClassifier does not support class_weight directly.
+        When class_weight is provided, the model converts it to sample weights
+        during fit to address class imbalance.
     """
     
     def __init__(self, random_state: int = 2112, **kwargs):

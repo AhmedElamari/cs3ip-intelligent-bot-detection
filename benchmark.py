@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 from datetime import datetime
@@ -36,6 +37,7 @@ from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyz
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
+LOGGER = logging.getLogger(__name__)
 
 
 def resolve_data_source() -> dict:
@@ -148,9 +150,10 @@ def _safe_stratified_split(
             stratify=labels
         )
     except ValueError as exc:
-        print(
-            f"\n[WARNING] Stratified {split_name} split failed ({exc}). "
-            "Falling back to unstratified split."
+        LOGGER.warning(
+            "Stratified %s split failed (%s). Falling back to unstratified split.",
+            split_name,
+            exc
         )
         return train_test_split(
             indices,
