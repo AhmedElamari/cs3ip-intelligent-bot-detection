@@ -19,8 +19,8 @@ from sklearn.metrics import (
 )
 
 from DataLoader import (
-    TwiBotDataLoader, load_twibot_json, load_twibot_splits,
-    load_twibot_splits_as_dict, check_twibot_data_available, splits_available
+    TwiBotDataLoader, load_twibot_json,
+    load_twibot_splits_as_dict, check_twibot_data_available
 )
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
