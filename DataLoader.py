@@ -278,13 +278,6 @@ def load_twibot_splits_as_dict(
     return splits
 
 
-def splits_available(data_dir: Union[str, Path] = 'data') -> bool:
-    """Check whether curated train/dev/test splits are available."""
-    data_dir = Path(data_dir)
-    required_files = ['train.json', 'dev.json', 'test.json']
-    return all((data_dir / f).exists() for f in required_files)
-
-
 def check_twibot_data_available() -> dict:
     """
     Check what TwiBot-20 data files are available.
@@ -330,42 +323,28 @@ def check_twibot_data_available() -> dict:
 
 
 if __name__ == '__main__':
-    # Example usage
     import sys
     
-    # Check what data is available
-    print("Checking available TwiBot-20 data...")
-    availability = check_twibot_data_available()
-    print(f"Sample file available: {availability['sample_available']}")
-    print(f"Split files:")
-    for split, info in availability['splits_available'].items():
-        if info['exists']:
-            print(f"  {split}: {info['count']} users, labels embedded: {info['has_labels']}")
-        else:
-            print(f"  {split}: not found")
-    print(f"Total in splits: {availability['total_split_samples']} users")
-    print()
+    # Quick demo: load data from CLI arg or sample file
+    json_file = sys.argv[1] if len(sys.argv) > 1 else None
     
     # Load data based on command line args or available data
-    if len(sys.argv) > 1:
-        json_file = sys.argv[1]
+    if json_file:
         df = load_twibot_json(json_file)
-    elif availability['total_split_samples'] > 0:
-        print("Loading from split files (train + dev + test)...")
-        df = load_twibot_splits()
-    elif availability['sample_available']:
-        print("Loading from sample file...")
-        df = load_twibot_json('TwiBot-20_sample.json')
     else:
-        print("No TwiBot-20 data files found!")
-        sys.exit(1)
+        # Check what data is available
+        availability = check_twibot_data_available()
+        if availability['total_split_samples'] > 0:
+            print("Loading from split files (train + dev + test)...")
+            df = load_twibot_splits()
+        elif availability['sample_available']:
+            print("Loading from sample file...")
+            df = load_twibot_json('TwiBot-20_sample.json')
+        else:
+            print("No TwiBot-20 data files found!")
+            sys.exit(1)
     
     print(f"\nLoaded {len(df)} records with columns:")
     print(df.columns.tolist())
     if 'label' in df.columns:
-        print(f"\nLabel distribution:")
-        print(df['label'].value_counts())
-    print(f"\nSample data:")
-    print(df.head())
-    print(f"\nData types:")
-    print(df.dtypes)
+        print(f"Labels: {df['label'].value_counts().to_dict()}")

@@ -20,8 +20,7 @@ from sklearn.model_selection import train_test_split
 
 # Project imports
 from DataLoader import (
-    load_twibot_json, load_twibot_splits, load_twibot_splits_as_dict,
-    check_twibot_data_available, splits_available
+    load_twibot_json, load_twibot_splits_as_dict, check_twibot_data_available
 )
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
