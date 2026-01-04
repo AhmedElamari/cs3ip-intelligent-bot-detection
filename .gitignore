@@ -5,6 +5,11 @@ __pycache__/
 
 results/
 
+# Data files (too large for GitHub, keep local only)
+data/
+*.json
+!config/*.json
+
 .env
 .venv/
 venv/

@@ -33,38 +33,50 @@ class BotFeatureExtractor:
         
         return df
 
+    def _safe_to_numeric(self, series: pd.Series, default: float = 0) -> pd.Series:
+        """Safely convert series to numeric, handling strings with spaces."""
+        # Strip whitespace from string values
+        if series.dtype == object:
+            series = series.astype(str).str.strip()
+        result = pd.to_numeric(series, errors='coerce').fillna(default)
+        # Replace infinity with a large but finite value
+        result = result.replace([np.inf, -np.inf], default)
+        return result
+
     def extract_activity_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Extract activity-related features from user statistics."""
         df = df.copy()
         
         # Follower/following counts
         if 'followers_count' in df.columns:
-            df['followers_count'] = pd.to_numeric(df['followers_count'], errors='coerce').fillna(0)
+            df['followers_count'] = self._safe_to_numeric(df['followers_count'])
             self.feature_names.append('followers_count')
         
         if 'friends_count' in df.columns:
-            df['friends_count'] = pd.to_numeric(df['friends_count'], errors='coerce').fillna(0)
+            df['friends_count'] = self._safe_to_numeric(df['friends_count'])
             self.feature_names.append('friends_count')
         
         # Followers to friends ratio (important bot indicator)
         if 'followers_count' in df.columns and 'friends_count' in df.columns:
-            # Avoid division by zero
-            df['followers_to_friends_ratio'] = df['followers_count'] / (df['friends_count'] + 1)
+            # Avoid division by zero and cap extreme values
+            ratio = df['followers_count'] / (df['friends_count'] + 1)
+            # Cap at a reasonable maximum (e.g., 1000x more followers than friends)
+            df['followers_to_friends_ratio'] = ratio.clip(upper=1000)
             self.feature_names.append('followers_to_friends_ratio')
         
         # Listed count (how many lists user is on - popularity indicator)
         if 'listed_count' in df.columns:
-            df['listed_count'] = pd.to_numeric(df['listed_count'], errors='coerce').fillna(0)
+            df['listed_count'] = self._safe_to_numeric(df['listed_count'])
             self.feature_names.append('listed_count')
         
         # Statuses count (total tweets)
         if 'statuses_count' in df.columns:
-            df['statuses_count'] = pd.to_numeric(df['statuses_count'], errors='coerce').fillna(0)
+            df['statuses_count'] = self._safe_to_numeric(df['statuses_count'])
             self.feature_names.append('statuses_count')
         
         # Favourites count
         if 'favourites_count' in df.columns:
-            df['favourites_count'] = pd.to_numeric(df['favourites_count'], errors='coerce').fillna(0)
+            df['favourites_count'] = self._safe_to_numeric(df['favourites_count'])
             self.feature_names.append('favourites_count')
         
         return df
@@ -133,19 +145,29 @@ class BotFeatureExtractor:
         """Extract derived/computed features."""
         df = df.copy()
         
+        # Ensure account_age_days is numeric and handle negative/zero values
+        if 'account_age_days' in df.columns:
+            df['account_age_days'] = self._safe_to_numeric(df['account_age_days'], default=1)
+            # Ensure minimum of 1 day to avoid division issues
+            df['account_age_days'] = df['account_age_days'].clip(lower=1)
+        
         # Tweets per day (activity rate)
         if 'statuses_count' in df.columns and 'account_age_days' in df.columns:
-            df['tweets_per_day'] = df['statuses_count'] / (df['account_age_days'] + 1)
+            tweets_per_day = df['statuses_count'] / df['account_age_days']
+            # Cap at reasonable maximum (e.g., 1000 tweets per day)
+            df['tweets_per_day'] = tweets_per_day.clip(upper=1000).replace([np.inf, -np.inf], 0)
             self.feature_names.append('tweets_per_day')
         
         # Favourites per day
         if 'favourites_count' in df.columns and 'account_age_days' in df.columns:
-            df['favourites_per_day'] = df['favourites_count'] / (df['account_age_days'] + 1)
+            fav_per_day = df['favourites_count'] / df['account_age_days']
+            df['favourites_per_day'] = fav_per_day.clip(upper=1000).replace([np.inf, -np.inf], 0)
             self.feature_names.append('favourites_per_day')
         
         # Followers per day (growth rate)
         if 'followers_count' in df.columns and 'account_age_days' in df.columns:
-            df['followers_per_day'] = df['followers_count'] / (df['account_age_days'] + 1)
+            followers_per_day = df['followers_count'] / df['account_age_days']
+            df['followers_per_day'] = followers_per_day.clip(upper=10000).replace([np.inf, -np.inf], 0)
             self.feature_names.append('followers_per_day')
         
         return df
