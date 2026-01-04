@@ -2,11 +2,16 @@ import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Union
 
 
 class TwiBotDataLoader:
-    """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame."""
+    """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame.
+    
+    Supports both:
+    - Single JSON file with optional separate labels CSV
+    - Multiple JSON files (train/dev/test splits) with embedded labels
+    """
 
     # Mapping from TwiBot-20 JSON fields to expected column names
     FIELD_MAPPING = {
@@ -24,23 +29,46 @@ class TwiBotDataLoader:
     ]
     LABEL_ID_CANDIDATES = ('ID', 'id', 'user_id')
 
-    def __init__(self, json_path: str, label_path: Optional[str] = None):
+    def __init__(
+        self,
+        json_path: Optional[Union[str, Path]] = None,
+        label_path: Optional[str] = None,
+        json_paths: Optional[List[Union[str, Path]]] = None
+    ):
         """
         Initialize the data loader.
 
         Args:
-            json_path: Path to the TwiBot-20 JSON file
+            json_path: Path to a single TwiBot-20 JSON file
             label_path: Optional path to a separate labels file (CSV with ID/id/user_id and label columns)
+            json_paths: Optional list of JSON file paths to load and combine (for train/dev/test splits)
         """
-        self.json_path = Path(json_path)
+        if json_paths:
+            self.json_paths = [Path(p) for p in json_paths]
+            self.json_path = None
+        elif json_path:
+            self.json_path = Path(json_path)
+            self.json_paths = None
+        else:
+            raise ValueError("Either json_path or json_paths must be provided")
+        
         self.label_path = Path(label_path) if label_path else None
         self.raw_data = None
         self.labels = None
 
     def load_json(self) -> list:
-        """Load raw JSON data from file."""
-        with open(self.json_path, 'r', encoding='utf-8') as f:
-            self.raw_data = json.load(f)
+        """Load raw JSON data from file(s)."""
+        if self.json_paths:
+            # Load and combine multiple files
+            self.raw_data = []
+            for path in self.json_paths:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.raw_data.extend(data)
+        else:
+            # Single file
+            with open(self.json_path, 'r', encoding='utf-8') as f:
+                self.raw_data = json.load(f)
         return self.raw_data
 
     def load_labels(self) -> Optional[pd.DataFrame]:
@@ -135,6 +163,20 @@ class TwiBotDataLoader:
         # Extract top-level ID
         flat['user_id'] = self._clean_string(user.get('ID', ''))
 
+        # Extract embedded label if present (TwiBot-20 format stores as string '0' or '1')
+        if 'label' in user:
+            label_val = user.get('label')
+            if label_val is not None:
+                # Convert string labels to int
+                if isinstance(label_val, str):
+                    label_val = label_val.strip()
+                    if label_val in ('0', '1'):
+                        flat['label'] = int(label_val)
+                    elif label_val.lower() in ('bot', 'human'):
+                        flat['label'] = 1 if label_val.lower() == 'bot' else 0
+                else:
+                    flat['label'] = int(label_val) if label_val in (0, 1) else None
+
         # Extract profile fields
         profile = user.get('profile', {}) or {}
         for field in self.PROFILE_FIELDS:
@@ -145,7 +187,10 @@ class TwiBotDataLoader:
 
         # Extract domain (first domain if list)
         domain = user.get('domain', [])
-        flat['domain'] = domain[0] if domain else None
+        if isinstance(domain, list):
+            flat['domain'] = domain[0] if domain else None
+        else:
+            flat['domain'] = domain
 
         # Extract tweet count from tweet list
         tweets = user.get('tweet', [])
@@ -153,8 +198,10 @@ class TwiBotDataLoader:
 
         # Extract neighbor counts
         neighbor = user.get('neighbor', {}) or {}
-        flat['following_sample_count'] = len(neighbor.get('following', []))
-        flat['follower_sample_count'] = len(neighbor.get('follower', []))
+        if neighbor is None:
+            neighbor = {}
+        flat['following_sample_count'] = len(neighbor.get('following', []) or [])
+        flat['follower_sample_count'] = len(neighbor.get('follower', []) or [])
 
         return flat
 
@@ -184,13 +231,17 @@ class TwiBotDataLoader:
                     else int(bool(x))
                 )
 
-        # Merge labels if available
-        if self.labels is not None:
-            df = self._merge_labels(df)
-        elif self.label_path:
-            self.load_labels()
+        # Check if labels were embedded and extracted during flattening
+        has_embedded_labels = 'label' in df.columns and df['label'].notna().any()
+
+        # Merge external labels if available and embedded labels not present/complete
+        if not has_embedded_labels:
             if self.labels is not None:
                 df = self._merge_labels(df)
+            elif self.label_path:
+                self.load_labels()
+                if self.labels is not None:
+                    df = self._merge_labels(df)
 
         return df
 
@@ -232,16 +283,188 @@ def load_twibot_json(json_path: str, label_path: Optional[str] = None) -> pd.Dat
     return loader.load()
 
 
+def load_twibot_splits(
+    data_dir: Union[str, Path] = 'data',
+    splits: Optional[List[str]] = None,
+    label_path: Optional[str] = None
+) -> pd.DataFrame:
+    """
+    Load TwiBot-20 data from train/dev/test split files.
+    
+    The data folder should contain train.json, dev.json, and test.json files
+    with embedded labels.
+
+    Args:
+        data_dir: Path to directory containing train.json, dev.json, test.json
+        splits: Which splits to load. Options: 'train', 'dev', 'test', 'all'.
+                Default is ['train', 'dev', 'test'] (all splits combined)
+        label_path: Optional path to external labels CSV (only used if embedded
+                    labels are not present)
+
+    Returns:
+        Flattened pandas DataFrame with data from requested splits
+    """
+    data_dir = Path(data_dir)
+    
+    if splits is None:
+        splits = ['train', 'dev', 'test']
+    elif isinstance(splits, str):
+        if splits == 'all':
+            splits = ['train', 'dev', 'test']
+        else:
+            splits = [splits]
+    
+    # Build list of JSON files to load
+    json_paths = []
+    for split in splits:
+        split_path = data_dir / f'{split}.json'
+        if not split_path.exists():
+            raise FileNotFoundError(
+                f"Split file not found: {split_path}. "
+                f"Expected files in {data_dir}: train.json, dev.json, test.json"
+            )
+        json_paths.append(split_path)
+    
+    loader = TwiBotDataLoader(json_paths=json_paths, label_path=label_path)
+    df = loader.load()
+    
+    return df
+
+
+def get_twibot_data_path() -> Path:
+    """Get the default TwiBot-20 data directory path."""
+    return Path(__file__).resolve().parent / 'data'
+
+
+def load_twibot_splits_as_dict(
+    data_dir: Union[str, Path] = 'data',
+    label_path: Optional[str] = None
+) -> dict:
+    """
+    Load TwiBot-20 data splits as separate DataFrames (pyi-style).
+    
+    This preserves the original train/dev/test split design, which typically
+    results in better model performance than re-splitting combined data.
+
+    Args:
+        data_dir: Path to directory containing train.json, dev.json, test.json
+        label_path: Optional path to external labels CSV
+
+    Returns:
+        Dictionary with keys 'train', 'val', 'test' mapping to DataFrames
+    """
+    data_dir = Path(data_dir)
+    
+    split_files = {
+        'train': data_dir / 'train.json',
+        'val': data_dir / 'dev.json',  # Note: dev.json maps to 'val' key
+        'test': data_dir / 'test.json'
+    }
+    
+    # Verify all files exist
+    missing = [name for name, path in split_files.items() if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing split files: {missing}. "
+            f"Expected train.json, dev.json, test.json in {data_dir}"
+        )
+    
+    splits = {}
+    for split_name, split_path in split_files.items():
+        loader = TwiBotDataLoader(json_path=split_path, label_path=label_path)
+        splits[split_name] = loader.load()
+    
+    return splits
+
+
+def splits_available(data_dir: Union[str, Path] = 'data') -> bool:
+    """Check whether curated train/dev/test splits are available."""
+    data_dir = Path(data_dir)
+    required_files = ['train.json', 'dev.json', 'test.json']
+    return all((data_dir / f).exists() for f in required_files)
+
+
+def check_twibot_data_available() -> dict:
+    """
+    Check what TwiBot-20 data files are available.
+    
+    Returns:
+        Dictionary with file availability and sample counts
+    """
+    repo_root = Path(__file__).resolve().parent
+    data_dir = repo_root / 'data'
+    sample_path = repo_root / 'TwiBot-20_sample.json'
+    
+    result = {
+        'sample_available': sample_path.exists(),
+        'splits_available': {},
+        'total_split_samples': 0
+    }
+    
+    for split in ['train', 'dev', 'test']:
+        split_path = data_dir / f'{split}.json'
+        if split_path.exists():
+            try:
+                with open(split_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                count = len(data)
+                has_labels = any('label' in user for user in data[:10])
+            except Exception:
+                count = 0
+                has_labels = False
+            result['splits_available'][split] = {
+                'exists': True,
+                'count': count,
+                'has_labels': has_labels
+            }
+            result['total_split_samples'] += count
+        else:
+            result['splits_available'][split] = {
+                'exists': False,
+                'count': 0,
+                'has_labels': False
+            }
+    
+    return result
+
+
 if __name__ == '__main__':
     # Example usage
     import sys
     
-    json_file = sys.argv[1] if len(sys.argv) > 1 else 'TwiBot-20_sample.json'
-    label_file = sys.argv[2] if len(sys.argv) > 2 else None
+    # Check what data is available
+    print("Checking available TwiBot-20 data...")
+    availability = check_twibot_data_available()
+    print(f"Sample file available: {availability['sample_available']}")
+    print(f"Split files:")
+    for split, info in availability['splits_available'].items():
+        if info['exists']:
+            print(f"  {split}: {info['count']} users, labels embedded: {info['has_labels']}")
+        else:
+            print(f"  {split}: not found")
+    print(f"Total in splits: {availability['total_split_samples']} users")
+    print()
     
-    df = load_twibot_json(json_file, label_file)
-    print(f"Loaded {len(df)} records with columns:")
+    # Load data based on command line args or available data
+    if len(sys.argv) > 1:
+        json_file = sys.argv[1]
+        label_file = sys.argv[2] if len(sys.argv) > 2 else None
+        df = load_twibot_json(json_file, label_file)
+    elif availability['total_split_samples'] > 0:
+        print("Loading from split files (train + dev + test)...")
+        df = load_twibot_splits()
+    elif availability['sample_available']:
+        print("Loading from sample file...")
+        df = load_twibot_json('TwiBot-20_sample.json')
+    else:
+        print("No TwiBot-20 data files found!")
+        sys.exit(1)
+    
+    print(f"\nLoaded {len(df)} records with columns:")
     print(df.columns.tolist())
+    if 'label' in df.columns:
+        print(f"\nLabel distribution:")
+        print(df['label'].value_counts())
     print(f"\nSample data:")
     print(df.head())
     print(f"\nData types:")

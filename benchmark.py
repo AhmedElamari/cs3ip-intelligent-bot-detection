@@ -19,7 +19,10 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 # Project imports
-from DataLoader import load_twibot_json
+from DataLoader import (
+    load_twibot_json, load_twibot_splits, load_twibot_splits_as_dict,
+    check_twibot_data_available, splits_available
+)
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from config import Config, load_config
@@ -33,99 +36,257 @@ from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyz
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
+TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 
 
-def resolve_twibot20_path() -> Path:
-    if not TWIBOT20_DATA_PATH.exists():
-        raise FileNotFoundError(
-            "TwiBot-20 dataset not found. Expected file at "
-            f"{TWIBOT20_DATA_PATH}"
-        )
-    return TWIBOT20_DATA_PATH
+def resolve_data_source() -> dict:
+    """
+    Determine best available data source.
+    
+    Returns:
+        dict with 'type' ('splits' or 'sample'), 'path', and 'count'
+    """
+    availability = check_twibot_data_available()
+    
+    # Prefer split files if they have labels and reasonable count
+    if availability['total_split_samples'] > 0:
+        splits_info = availability['splits_available']
+        has_labels = all(s['has_labels'] for s in splits_info.values() if s['exists'])
+        if has_labels:
+            return {
+                'type': 'splits',
+                'path': TWIBOT20_DATA_DIR,
+                'count': availability['total_split_samples']
+            }
+    
+    # Fall back to sample file
+    if availability['sample_available']:
+        return {
+            'type': 'sample',
+            'path': TWIBOT20_DATA_PATH,
+            'count': 100
+        }
+    
+    raise FileNotFoundError(
+        "No TwiBot-20 dataset found. Expected either:\n"
+        f"  - Split files in {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)\n"
+        f"  - Sample file at {TWIBOT20_DATA_PATH}"
+    )
 
 
-def load_data(label_path: str = None) -> pd.DataFrame:
-    """Load TwiBot-20 JSON data."""
-    data_path = resolve_twibot20_path()
-    print(f"Loading TwiBot-20 JSON data from: {data_path}")
-    df = load_twibot_json(str(data_path), label_path)
+def load_data(
+    label_path: str = None,
+    data_path: str = None,
+    use_sample: bool = False
+):
+    """Load TwiBot-20 JSON data.
+    
+    Prefers loading as separate splits (dict) to preserve original experimental design.
+    
+    Args:
+        label_path: Optional path to external labels CSV
+        data_path: Explicit path to JSON data file
+        use_sample: Force use of sample file instead of splits
+        
+    Returns:
+        Either dict of DataFrames {'train', 'val', 'test'} or single DataFrame
+    """
+    if data_path:
+        print(f"Loading TwiBot-20 JSON data from: {data_path}")
+        df = load_twibot_json(data_path, label_path)
+        print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
+        if 'label' in df.columns:
+            print(f"Label distribution: {df['label'].value_counts().to_dict()}")
+        return df
+    
+    source = resolve_data_source()
+    
+    # Use original splits (dict) when available - preserves experimental design
+    if source['type'] == 'splits' and not use_sample:
+        print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
+        splits = load_twibot_splits_as_dict(source['path'], label_path)
+        for name, df in splits.items():
+            print(f"{name} split: {len(df)} samples")
+        return splits
+    
+    # Fall back to single file
+    print(f"Loading TwiBot-20 sample from: {source['path']}")
+    df = load_twibot_json(str(source['path']), label_path)
     print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
+    if 'label' in df.columns:
+        print(f"Label distribution: {df['label'].value_counts().to_dict()}")
     return df
 
 
-def prepare_data(df: pd.DataFrame, config: Config) -> tuple:
-    """Prepare data: feature engineering, preprocessing, splitting."""
+def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
+    """Derive a leakage-safe reference date from the training split."""
+    if 'account_creation_date' not in train_df.columns:
+        return None
+    account_creation = pd.to_datetime(
+        train_df['account_creation_date'],
+        errors='coerce'
+    )
+    if account_creation.notna().any():
+        ref_date = account_creation.max()
+        # Ensure timezone-aware for consistency
+        if ref_date is not None and getattr(ref_date, "tz", None) is None:
+            ref_date = ref_date.tz_localize("UTC")
+        return ref_date
+    return None
+
+
+def prepare_data(data, config: Config) -> tuple:
+    """Prepare data: feature engineering, preprocessing, splitting.
+    
+    Args:
+        data: Either dict of DataFrames {'train', 'val', 'test'} or single DataFrame
+        config: Configuration object
+        
+    Returns:
+        Tuple of (X_train, X_val, X_test, y_train, y_val, y_test, feature_names)
+    """
     print("\n" + "="*60)
     print("DATA PREPARATION")
     print("="*60)
-    
-    # Check for labels
-    if 'label' not in df.columns:
-        print("\n[WARNING] No 'label' column found.")
-        print("Creating synthetic labels for demonstration...")
-        np.random.seed(config.get('random_state'))
-        df['label'] = np.random.randint(0, 2, size=len(df))
-    
-    df = df.dropna(subset=['label'])
-    if df.empty:
-        raise ValueError(
-            "No labeled records available after loading labels. "
-            "Check that label IDs match the TwiBot IDs."
-        )
     
     random_state = config.get('random_state')
     test_size = config.get('test_size', 0.1)
     val_size = config.get('val_size', 0.2)
     
-    # Split indices first to avoid leakage when deriving reference dates
-    indices = df.index.to_numpy()
-    labels = df['label'].to_numpy()
-    idx_temp, idx_test, labels_temp, _ = train_test_split(
-        indices, labels, test_size=test_size, random_state=random_state
-    )
-    val_ratio = val_size / (1 - test_size)
-    idx_train, idx_val, _, _ = train_test_split(
-        idx_temp, labels_temp, test_size=val_ratio, random_state=random_state
-    )
-    
-    # Feature engineering
-    print("\nExtracting features...")
-    reference_date = None
-    if 'account_creation_date' in df.columns:
-        account_creation = pd.to_datetime(
-            df.loc[idx_train, 'account_creation_date'], errors='coerce'
+    # Handle dict-based splits (preferred - preserves original experimental design)
+    if isinstance(data, dict):
+        splits = data
+        train_df = splits['train'].copy()
+        val_df = splits['val'].copy()
+        test_df = splits['test'].copy()
+        
+        # Check for labels in each split
+        for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+            if 'label' not in df.columns:
+                raise ValueError(f"No 'label' column found in {name} split")
+            df.dropna(subset=['label'], inplace=True)
+        
+        # Derive reference date from training data only (avoid leakage)
+        reference_date = _derive_reference_date(train_df)
+        
+        # Feature engineering on each split
+        print("\nExtracting features...")
+        extractor = BotFeatureExtractor(reference_date=reference_date)
+        train_df = extractor.extract_all_features(train_df)
+        
+        # Use same extractor (same reference date) for val/test
+        extractor_val = BotFeatureExtractor(reference_date=reference_date)
+        val_df = extractor_val.extract_all_features(val_df)
+        
+        extractor_test = BotFeatureExtractor(reference_date=reference_date)
+        test_df = extractor_test.extract_all_features(test_df)
+        
+        print(f"Extracted {len(extractor.get_feature_names())} features")
+        
+        # Preprocessing on each split
+        print("\nPreprocessing...")
+        detector = BotDetector()
+        
+        detector.data = train_df
+        train_df = detector.preprocess()
+        
+        detector.data = val_df
+        val_df = detector.preprocess()
+        
+        detector.data = test_df
+        test_df = detector.preprocess()
+        
+        # Extract features and labels
+        feature_names = (
+            train_df.drop(columns=['label'])
+            .select_dtypes(include=[np.number])
+            .columns
+            .tolist()
         )
-        if account_creation.notna().any():
-            reference_date = account_creation.max()
-        else:
-            full_account_creation = pd.to_datetime(
-                df['account_creation_date'], errors='coerce'
+        
+        X_train = train_df[feature_names]
+        y_train = train_df['label']
+        X_val = val_df[feature_names]
+        y_val = val_df['label']
+        X_test = test_df[feature_names]
+        y_test = test_df['label']
+        
+        print(f"\nFinal data shapes (using provided splits):")
+        
+    else:
+        # Single DataFrame - split it ourselves
+        df = data
+        
+        # Check for labels
+        if 'label' not in df.columns:
+            print("\n[WARNING] No 'label' column found.")
+            print("Creating synthetic labels for demonstration...")
+            np.random.seed(random_state)
+            df['label'] = np.random.randint(0, 2, size=len(df))
+        
+        df = df.dropna(subset=['label'])
+        if df.empty:
+            raise ValueError(
+                "No labeled records available after loading labels. "
+                "Check that label IDs match the TwiBot IDs."
             )
-            reference_date = pd.Timestamp.utcnow()
-            if full_account_creation.dt.tz is not None:
-                reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
-    extractor = BotFeatureExtractor(reference_date=reference_date)
-    df = extractor.extract_all_features(df)
-    print(f"Extracted {len(extractor.get_feature_names())} features")
+        
+        # Split indices first to avoid leakage when deriving reference dates
+        indices = df.index.to_numpy()
+        labels = df['label'].to_numpy()
+        idx_temp, idx_test, labels_temp, _ = train_test_split(
+            indices, labels, test_size=test_size, random_state=random_state
+        )
+        val_ratio = val_size / (1 - test_size)
+        idx_train, idx_val, _, _ = train_test_split(
+            idx_temp, labels_temp, test_size=val_ratio, random_state=random_state
+        )
+        
+        # Feature engineering
+        print("\nExtracting features...")
+        reference_date = None
+        if 'account_creation_date' in df.columns:
+            account_creation = pd.to_datetime(
+                df.loc[idx_train, 'account_creation_date'], errors='coerce'
+            )
+            if account_creation.notna().any():
+                reference_date = account_creation.max()
+            else:
+                full_account_creation = pd.to_datetime(
+                    df['account_creation_date'], errors='coerce'
+                )
+                reference_date = pd.Timestamp.utcnow()
+                if full_account_creation.dt.tz is not None:
+                    reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
+        extractor = BotFeatureExtractor(reference_date=reference_date)
+        df = extractor.extract_all_features(df)
+        print(f"Extracted {len(extractor.get_feature_names())} features")
+        
+        # Preprocessing
+        print("\nPreprocessing...")
+        detector = BotDetector()
+        detector.data = df
+        df = detector.preprocess()
+        
+        # Split data
+        print(f"\nSplitting data (train/val/test: {(1-test_size-val_size)*100:.0f}%/{val_size*100:.0f}%/{test_size*100:.0f}%)...")
+        feature_names = (
+            df.drop(columns=['label'])
+            .select_dtypes(include=[np.number])
+            .columns
+            .tolist()
+        )
+        X = df[feature_names]
+        y = df['label']
+        X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
+        y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
+        
+        print(f"\nFinal data shapes:")
     
-    # Preprocessing
-    print("\nPreprocessing...")
+    # Common post-processing for both paths
+    
+    # Reset detector for potential reuse
     detector = BotDetector()
-    detector.data = df
-    df = detector.preprocess()
-    
-    # Split data
-    print(f"\nSplitting data (train/val/test: {(1-test_size-val_size)*100:.0f}%/{val_size*100:.0f}%/{test_size*100:.0f}%)...")
-    feature_names = (
-        df.drop(columns=['label'])
-        .select_dtypes(include=[np.number])
-        .columns
-        .tolist()
-    )
-    X = df[feature_names]
-    y = df['label']
-    X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
-    y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
     
     # Handle imbalance if configured
     if config.get('preprocessing.handle_imbalance'):
@@ -149,7 +310,6 @@ def prepare_data(df: pd.DataFrame, config: Config) -> tuple:
         selected_indices = detector.selected_features
         feature_names = [feature_names[i] for i in selected_indices]
     
-    print(f"\nFinal data shapes:")
     print(f"  Training:   {X_train.shape}")
     print(f"  Validation: {X_val.shape}")
     print(f"  Test:       {X_test.shape}")
@@ -366,6 +526,17 @@ def main():
         action='store_true',
         help='Scale features'
     )
+    parser.add_argument(
+        '--data', '-d',
+        type=str,
+        default=None,
+        help='Explicit path to JSON data file (overrides auto-detection)'
+    )
+    parser.add_argument(
+        '--use-sample',
+        action='store_true',
+        help='Force use of sample file instead of full split data'
+    )
     
     args = parser.parse_args()
     
@@ -394,15 +565,23 @@ def main():
     output_dir = output_dir / f'benchmark_{timestamp}'
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Determine data source for logging
+    source = resolve_data_source()
+    data_source_str = args.data if args.data else str(source['path'])
+    
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
     print("="*60)
-    print(f"Data:   {resolve_twibot20_path()}")
+    print(f"Data:   {data_source_str}")
     print(f"Output: {output_dir}")
     print(f"Models: {config.get_enabled_models()}")
     
     # Load data
-    df = load_data(args.labels)
+    df = load_data(
+        label_path=args.labels,
+        data_path=args.data,
+        use_sample=args.use_sample
+    )
     
     # Prepare data
     X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(df, config)
