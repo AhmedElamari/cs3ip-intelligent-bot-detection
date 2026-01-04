@@ -243,7 +243,7 @@ def load_twibot_splits_as_dict(
     data_dir: Union[str, Path] = 'data'
 ) -> dict:
     """
-    Load TwiBot-20 data splits as separate DataFrames (pyi-style).
+    Load TwiBot-20 data splits as separate DataFrames.
     
     This preserves the original train/dev/test split design, which typically
     results in better model performance than re-splitting combined data.
