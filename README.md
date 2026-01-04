@@ -49,6 +49,8 @@ pip install shap lime matplotlib seaborn
 ## Quickstart
 Example files assumed:
 - `data/train.json`, `data/dev.json`, `data/test.json` (embedded labels)
+- Download the TwiBot-20 dataset from the official repository:
+  https://github.com/LuoUndergradXJ/TwiBot-20
 
 If you have a single JSON file instead of splits, pass it with `--data`.
 
@@ -110,6 +112,7 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 ## Data Notes
 - The pipeline expects TwiBot-20 JSON with labels embedded in the data.
 - Split files under `data/` (train/dev/test) are preferred when available.
+- Large datasets are intentionally not tracked in git; keep them local under `data/`.
 - If a single JSON file lacks labels, the pipeline synthesizes labels for demo purposes.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
