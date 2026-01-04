@@ -283,59 +283,6 @@ def load_twibot_json(json_path: str, label_path: Optional[str] = None) -> pd.Dat
     return loader.load()
 
 
-def load_twibot_splits(
-    data_dir: Union[str, Path] = 'data',
-    splits: Optional[List[str]] = None,
-    label_path: Optional[str] = None
-) -> pd.DataFrame:
-    """
-    Load TwiBot-20 data from train/dev/test split files.
-    
-    The data folder should contain train.json, dev.json, and test.json files
-    with embedded labels.
-
-    Args:
-        data_dir: Path to directory containing train.json, dev.json, test.json
-        splits: Which splits to load. Options: 'train', 'dev', 'test', 'all'.
-                Default is ['train', 'dev', 'test'] (all splits combined)
-        label_path: Optional path to external labels CSV (only used if embedded
-                    labels are not present)
-
-    Returns:
-        Flattened pandas DataFrame with data from requested splits
-    """
-    data_dir = Path(data_dir)
-    
-    if splits is None:
-        splits = ['train', 'dev', 'test']
-    elif isinstance(splits, str):
-        if splits == 'all':
-            splits = ['train', 'dev', 'test']
-        else:
-            splits = [splits]
-    
-    # Build list of JSON files to load
-    json_paths = []
-    for split in splits:
-        split_path = data_dir / f'{split}.json'
-        if not split_path.exists():
-            raise FileNotFoundError(
-                f"Split file not found: {split_path}. "
-                f"Expected files in {data_dir}: train.json, dev.json, test.json"
-            )
-        json_paths.append(split_path)
-    
-    loader = TwiBotDataLoader(json_paths=json_paths, label_path=label_path)
-    df = loader.load()
-    
-    return df
-
-
-def get_twibot_data_path() -> Path:
-    """Get the default TwiBot-20 data directory path."""
-    return Path(__file__).resolve().parent / 'data'
-
-
 def load_twibot_splits_as_dict(
     data_dir: Union[str, Path] = 'data',
     label_path: Optional[str] = None
@@ -375,13 +322,6 @@ def load_twibot_splits_as_dict(
         splits[split_name] = loader.load()
     
     return splits
-
-
-def splits_available(data_dir: Union[str, Path] = 'data') -> bool:
-    """Check whether curated train/dev/test splits are available."""
-    data_dir = Path(data_dir)
-    required_files = ['train.json', 'dev.json', 'test.json']
-    return all((data_dir / f).exists() for f in required_files)
 
 
 def check_twibot_data_available() -> dict:
@@ -429,43 +369,13 @@ def check_twibot_data_available() -> dict:
 
 
 if __name__ == '__main__':
-    # Example usage
     import sys
     
-    # Check what data is available
-    print("Checking available TwiBot-20 data...")
-    availability = check_twibot_data_available()
-    print(f"Sample file available: {availability['sample_available']}")
-    print(f"Split files:")
-    for split, info in availability['splits_available'].items():
-        if info['exists']:
-            print(f"  {split}: {info['count']} users, labels embedded: {info['has_labels']}")
-        else:
-            print(f"  {split}: not found")
-    print(f"Total in splits: {availability['total_split_samples']} users")
-    print()
+    # Quick demo: load data from CLI arg or sample file
+    json_file = sys.argv[1] if len(sys.argv) > 1 else 'TwiBot-20_sample.json'
+    label_file = sys.argv[2] if len(sys.argv) > 2 else None
     
-    # Load data based on command line args or available data
-    if len(sys.argv) > 1:
-        json_file = sys.argv[1]
-        label_file = sys.argv[2] if len(sys.argv) > 2 else None
-        df = load_twibot_json(json_file, label_file)
-    elif availability['total_split_samples'] > 0:
-        print("Loading from split files (train + dev + test)...")
-        df = load_twibot_splits()
-    elif availability['sample_available']:
-        print("Loading from sample file...")
-        df = load_twibot_json('TwiBot-20_sample.json')
-    else:
-        print("No TwiBot-20 data files found!")
-        sys.exit(1)
-    
-    print(f"\nLoaded {len(df)} records with columns:")
-    print(df.columns.tolist())
+    df = load_twibot_json(json_file, label_file)
+    print(f"Loaded {len(df)} records, {df.shape[1]} columns")
     if 'label' in df.columns:
-        print(f"\nLabel distribution:")
-        print(df['label'].value_counts())
-    print(f"\nSample data:")
-    print(df.head())
-    print(f"\nData types:")
-    print(df.dtypes)
+        print(f"Labels: {df['label'].value_counts().to_dict()}")
