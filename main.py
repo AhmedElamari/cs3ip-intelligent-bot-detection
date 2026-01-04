@@ -67,7 +67,6 @@ def resolve_data_source() -> dict:
 
 def load_and_prepare_data(
     data_path: str = None,
-    label_path: str = None,
     use_splits: bool = True
 ):
     """Load JSON data and prepare it for processing.
@@ -76,7 +75,6 @@ def load_and_prepare_data(
     
     Args:
         data_path: Explicit path to JSON file (overrides auto-detection)
-        label_path: Optional path to external labels CSV
         use_splits: If True and split files available, use them
         
     Returns:
@@ -85,9 +83,7 @@ def load_and_prepare_data(
     if data_path:
         # Use explicit path
         print(f"Loading data from: {data_path}")
-        if label_path:
-            print(f"Loading labels from: {label_path}")
-        loader = TwiBotDataLoader(data_path, label_path)
+        loader = TwiBotDataLoader(json_path=data_path)
         df = loader.load()
         print(f"Loaded {len(df)} records")
         if 'label' in df.columns:
@@ -100,16 +96,14 @@ def load_and_prepare_data(
     # Use original splits (dict) when available - preserves experimental design
     if source['type'] == 'splits' and use_splits:
         print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-        splits = load_twibot_splits_as_dict(source['path'], label_path)
+        splits = load_twibot_splits_as_dict(source['path'])
         for name, df in splits.items():
             print(f"{name} split: {len(df)} samples")
         return splits
     
     # Fall back to single file
     print(f"Loading TwiBot-20 sample from: {source['path']}")
-    if label_path:
-        print(f"Loading labels from: {label_path}")
-    df = load_twibot_json(str(source['path']), label_path)
+    df = load_twibot_json(str(source['path']))
     print(f"Loaded {len(df)} records")
     if 'label' in df.columns:
         print(f"Label distribution: {df['label'].value_counts().to_dict()}")
@@ -238,7 +232,6 @@ def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
 
 
 def run_pipeline(
-    label_path: str = None,
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
@@ -249,7 +242,6 @@ def run_pipeline(
     """Run the complete bot detection pipeline on TwiBot-20.
     
     Args:
-        label_path: Optional path to external labels CSV
         model_type: Model to use ('random_forest', 'logistic_regression', 'svm')
         use_smote: Apply SMOTE for class balancing
         use_scaling: Apply feature scaling
@@ -265,7 +257,6 @@ def run_pipeline(
     # Step 1: Load data
     data = load_and_prepare_data(
         data_path=data_path,
-        label_path=label_path,
         use_splits=not use_sample
     )
     
@@ -330,13 +321,7 @@ def run_pipeline(
         
         # Check if labels exist
         if 'label' not in df.columns:
-            if label_path:
-                raise ValueError(
-                    "Labels file was provided but no 'label' column was found "
-                    "after loading. Check the labels file and ID column mapping."
-                )
             print("\nWARNING: No 'label' column found in data.")
-            print("Please provide a labels file with --labels argument.")
             print("For demo purposes, creating synthetic labels...")
             np.random.seed(2112)
             df['label'] = np.random.randint(0, 2, size=len(df))
@@ -444,12 +429,6 @@ def main():
         description='Bot Detection Pipeline (TwiBot-20 only)'
     )
     parser.add_argument(
-        '--labels', '-l',
-        type=str,
-        default=None,
-        help='Path to labels CSV file (with ID and label columns)'
-    )
-    parser.add_argument(
         '--data', '-d',
         type=str,
         default=None,
@@ -487,7 +466,6 @@ def main():
     args = parser.parse_args()
     
     run_pipeline(
-        label_path=args.labels,
         model_type=args.model,
         use_smote=args.smote,
         use_scaling=args.scale,
