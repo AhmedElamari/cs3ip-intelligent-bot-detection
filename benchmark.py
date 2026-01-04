@@ -75,7 +75,6 @@ def resolve_data_source() -> dict:
 
 
 def load_data(
-    label_path: str = None,
     data_path: str = None,
     use_sample: bool = False
 ):
@@ -84,7 +83,6 @@ def load_data(
     Prefers loading as separate splits (dict) to preserve original experimental design.
     
     Args:
-        label_path: Optional path to external labels CSV
         data_path: Explicit path to JSON data file
         use_sample: Force use of sample file instead of splits
         
@@ -93,7 +91,7 @@ def load_data(
     """
     if data_path:
         print(f"Loading TwiBot-20 JSON data from: {data_path}")
-        df = load_twibot_json(data_path, label_path)
+        df = load_twibot_json(data_path)
         print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
         if 'label' in df.columns:
             print(f"Label distribution: {df['label'].value_counts().to_dict()}")
@@ -104,14 +102,14 @@ def load_data(
     # Use original splits (dict) when available - preserves experimental design
     if source['type'] == 'splits' and not use_sample:
         print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-        splits = load_twibot_splits_as_dict(source['path'], label_path)
+        splits = load_twibot_splits_as_dict(source['path'])
         for name, df in splits.items():
             print(f"{name} split: {len(df)} samples")
         return splits
     
     # Fall back to single file
     print(f"Loading TwiBot-20 sample from: {source['path']}")
-    df = load_twibot_json(str(source['path']), label_path)
+    df = load_twibot_json(str(source['path']))
     print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
     if 'label' in df.columns:
         print(f"Label distribution: {df['label'].value_counts().to_dict()}")
@@ -482,12 +480,6 @@ def main():
     )
     
     parser.add_argument(
-        '--labels', '-l',
-        type=str,
-        default=None,
-        help='Path to labels CSV file'
-    )
-    parser.add_argument(
         '--config', '-c',
         type=str,
         default=None,
@@ -578,7 +570,6 @@ def main():
     
     # Load data
     df = load_data(
-        label_path=args.labels,
         data_path=args.data,
         use_sample=args.use_sample
     )
