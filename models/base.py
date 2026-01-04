@@ -101,7 +101,7 @@ class BaseModel(ABC):
             self.feature_names = [f'feature_{i}' for i in range(X_train.shape[1])]
         
         start_time = time.time()
-        self.model.fit(X_train, y_train, **kwargs)
+        self.model.fit(X_train, y_train)
         self.training_time = time.time() - start_time
         self.is_fitted = True
         

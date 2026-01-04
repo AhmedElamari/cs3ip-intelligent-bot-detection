@@ -87,7 +87,6 @@ class Config:
                     'min_samples_leaf': 1,
                     'subsample': 0.8,
                     'max_features': 'sqrt',
-                    'class_weight': 'balanced',
                 }
             },
         },
@@ -350,7 +349,6 @@ models:
       learning_rate: 0.1
       max_depth: 5
       subsample: 0.8
-      class_weight: balanced
 
 explainability:
   enabled: true

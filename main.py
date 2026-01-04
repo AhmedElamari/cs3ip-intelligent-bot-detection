@@ -231,34 +231,6 @@ def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
     return None
 
 
-def _safe_stratified_split(
-    indices: np.ndarray,
-    labels: np.ndarray,
-    test_size: float,
-    random_state: int,
-    split_name: str
-):
-    try:
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=labels
-        )
-    except ValueError as exc:
-        print(
-            f"\n[WARNING] Stratified {split_name} split failed ({exc}). "
-            "Falling back to unstratified split."
-        )
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state
-        )
-
-
 def run_pipeline(
     model_type: str = 'random_forest',
     use_smote: bool = False,
@@ -364,12 +336,12 @@ def run_pipeline(
         
         indices = df.index.to_numpy()
         labels = df['label'].to_numpy()
-        idx_temp, idx_test, labels_temp, _ = _safe_stratified_split(
-            indices, labels, test_size=0.1, random_state=2112, split_name="test"
+        idx_temp, idx_test, labels_temp, _ = train_test_split(
+            indices, labels, test_size=0.1, random_state=2112
         )
         val_ratio = 0.2 / (1 - 0.1)
-        idx_train, idx_val, _, _ = _safe_stratified_split(
-            idx_temp, labels_temp, test_size=val_ratio, random_state=2112, split_name="validation"
+        idx_train, idx_val, _, _ = train_test_split(
+            idx_temp, labels_temp, test_size=val_ratio, random_state=2112
         )
         
         # Feature engineering
@@ -421,13 +393,9 @@ def run_pipeline(
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method='smote')
         print(f"After SMOTE: {len(X_train)} training samples")
     
-    # Step 6: Feature scaling (recommended for logistic regression/SVM)
-    should_scale = use_scaling or model_type in ('logistic_regression', 'svm')
-    if should_scale:
-        if use_scaling:
-            print("\nApplying feature scaling...")
-        else:
-            print(f"\nApplying feature scaling for {model_type}...")
+    # Step 6: Feature scaling (optional, for logistic regression/SVM)
+    if use_scaling:
+        print("\nApplying feature scaling...")
         X_train, X_val, X_test = detector.scale_features(X_train, X_val, X_test)
     
     # Step 7: Feature selection (optional)
