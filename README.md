@@ -119,9 +119,9 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 
 ## Data Download
 1) Download the TwiBot-20 dataset from:
-   https://github.com/LuoUndergradXJ/TwiBot-20
-2) Extract the archive.
-3) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
+   https://github.com/BunsenFeng/TwiBot-20.git
+3) Extract the archive.
+4) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
 
 The `data/` folder is gitignored, so these files stay local and will not be committed.
 
