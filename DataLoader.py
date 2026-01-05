@@ -372,14 +372,12 @@ def check_twibot_data_available() -> dict:
     Check what TwiBot-20 data files are available.
     
     Returns:
-        Dictionary with file availability and sample counts
+        Dictionary with file availability and sample counts for splits
     """
     repo_root = Path(__file__).resolve().parent
     data_dir = repo_root / 'data'
-    sample_path = repo_root / 'TwiBot-20_sample.json'
     
     result = {
-        'sample_available': sample_path.exists(),
         'splits_available': {},
         'total_split_samples': 0
     }

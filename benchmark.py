@@ -4,14 +4,13 @@ Bot Detection Benchmark Pipeline
 Main script to run comprehensive model benchmarking with XAI analysis.
 
 Usage:
-    python benchmark.py --labels labels.csv
-    python benchmark.py --labels labels.csv --config config/config.yaml
-    python benchmark.py --labels labels.csv --explain --save-plots
+    python benchmark.py
+    python benchmark.py --config config/config.yaml
+    python benchmark.py --explain --save-plots
 """
 
 import argparse
 import logging
-import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -20,22 +19,18 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 # Project imports
-from DataLoader import (
-    load_twibot_json, load_twibot_splits_as_dict, check_twibot_data_available
-)
+from DataLoader import load_twibot_splits_as_dict, check_twibot_data_available
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from config import Config, load_config
 from models import (
-    get_model, get_all_models,
     LogisticRegressionModel, SVMModel, DecisionTreeModel,
     RandomForestModel, GradientBoostingModel
 )
-from benchmarking import ModelBenchmark, MetricsCalculator
+from benchmarking import ModelBenchmark
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
 
 REPO_ROOT = Path(__file__).resolve().parent
-TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 LOGGER = logging.getLogger(__name__)
 
@@ -45,11 +40,11 @@ def resolve_data_source() -> dict:
     Determine best available data source.
     
     Returns:
-        dict with 'type' ('splits' or 'sample'), 'path', and 'count'
+        dict with 'type' ('splits'), 'path', and 'count'
     """
     availability = check_twibot_data_available()
     
-    # Prefer split files if they have labels and reasonable count
+    # Require split files with labels
     if availability['total_split_samples'] > 0:
         splits_info = availability['splits_available']
         has_labels = all(s['has_labels'] for s in splits_info.values() if s['exists'])
@@ -60,61 +55,20 @@ def resolve_data_source() -> dict:
                 'count': availability['total_split_samples']
             }
     
-    # Fall back to sample file
-    if availability['sample_available']:
-        return {
-            'type': 'sample',
-            'path': TWIBOT20_DATA_PATH,
-            'count': 100
-        }
-    
     raise FileNotFoundError(
-        "No TwiBot-20 dataset found. Expected either:\n"
-        f"  - Split files in {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)\n"
-        f"  - Sample file at {TWIBOT20_DATA_PATH}"
+        "No TwiBot-20 dataset found. Expected split files in:\n"
+        f"  {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)"
     )
 
 
-def load_data(
-    data_path: str = None,
-    use_sample: bool = False
-):
-    """Load TwiBot-20 JSON data.
-    
-    Prefers loading as separate splits (dict) to preserve original experimental design.
-    
-    Args:
-        data_path: Explicit path to JSON data file
-        use_sample: Force use of sample file instead of splits
-        
-    Returns:
-        Either dict of DataFrames {'train', 'val', 'test'} or single DataFrame
-    """
-    if data_path:
-        print(f"Loading TwiBot-20 JSON data from: {data_path}")
-        df = load_twibot_json(data_path)
-        print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
-        if 'label' in df.columns:
-            print(f"Label distribution: {df['label'].value_counts().to_dict()}")
-        return df
-    
+def load_data() -> dict:
+    """Load TwiBot-20 JSON split data from the local data/ directory."""
     source = resolve_data_source()
-    
-    # Use original splits (dict) when available - preserves experimental design
-    if source['type'] == 'splits' and not use_sample:
-        print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-        splits = load_twibot_splits_as_dict(source['path'])
-        for name, df in splits.items():
-            print(f"{name} split: {len(df)} samples")
-        return splits
-    
-    # Fall back to single file
-    print(f"Loading TwiBot-20 sample from: {source['path']}")
-    df = load_twibot_json(str(source['path']))
-    print(f"Loaded {len(df)} samples with {df.shape[1]} columns")
-    if 'label' in df.columns:
-        print(f"Label distribution: {df['label'].value_counts().to_dict()}")
-    return df
+    print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(source['path'])
+    for name, df in splits.items():
+        print(f"{name} split: {len(df)} samples")
+    return splits
 
 
 def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
@@ -556,18 +510,6 @@ def main():
         action='store_true',
         help='Scale features'
     )
-    parser.add_argument(
-        '--data', '-d',
-        type=str,
-        default=None,
-        help='Explicit path to JSON data file (overrides auto-detection)'
-    )
-    parser.add_argument(
-        '--use-sample',
-        action='store_true',
-        help='Force use of sample file instead of full split data'
-    )
-    
     args = parser.parse_args()
     
     # Load configuration
@@ -605,7 +547,7 @@ def main():
     
     # Determine data source for logging
     source = resolve_data_source()
-    data_source_str = args.data if args.data else str(source['path'])
+    data_source_str = str(source['path'])
     
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
@@ -615,13 +557,10 @@ def main():
     print(f"Models: {config.get_enabled_models()}")
     
     # Load data
-    df = load_data(
-        data_path=args.data,
-        use_sample=args.use_sample
-    )
+    data_splits = load_data()
     
     # Prepare data
-    X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(df, config)
+    X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(data_splits, config)
     
     # Create models
     models = create_models(config)

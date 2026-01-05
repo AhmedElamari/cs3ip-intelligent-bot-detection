@@ -52,15 +52,9 @@ Example files assumed:
 - Download the TwiBot-20 dataset from the official repository:
   https://github.com/BunsenFeng/TwiBot-20.git
 
-If you have a single JSON file instead of splits, pass it with `--data`.
-
 Run a single model:
 ```bash
 python main.py --model random_forest
-```
-Or with a single JSON file:
-```bash
-python main.py --data path/to/twibot.json --model random_forest
 ```
 Expected output (console):
 - Training/validation/test sizes
@@ -70,10 +64,6 @@ Expected output (console):
 Run a benchmark with explainability:
 ```bash
 python benchmark.py --explain --save-plots
-```
-Or with a single JSON file:
-```bash
-python benchmark.py --data path/to/twibot.json --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -91,7 +81,6 @@ Options:
 - `--smote`: enable SMOTE
 - `--scale`: enable feature scaling
 - `--features`: select top-k features
-- `--data`: path to a single TwiBot-20 JSON file
 
 ### Benchmarking and Explainability
 ```bash
@@ -102,7 +91,6 @@ Options:
 - `--config`: load YAML or JSON config
 - `--models`: specify models to run
 - `--smote` / `--scale`: override preprocessing settings
-- `--data`: path to a single TwiBot-20 JSON file
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
@@ -111,17 +99,16 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 
 ## Data Notes
 - The pipeline expects TwiBot-20 JSON with labels embedded in the data.
-- Split files under `data/` (train/dev/test) are preferred when available.
+- Split files under `data/` (train/dev/test) are required for runs.
 - Large datasets are intentionally not tracked in git; keep them local under `data/`.
-- If a single JSON file lacks labels, the pipeline synthesizes labels for demo purposes.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
 ## Data Download
 1) Download the TwiBot-20 dataset from:
    https://github.com/BunsenFeng/TwiBot-20.git
-3) Extract the archive.
-4) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
+2) Extract the archive.
+3) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
 
 The `data/` folder is gitignored, so these files stay local and will not be committed.
 
