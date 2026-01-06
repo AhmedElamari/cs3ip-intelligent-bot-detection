@@ -14,11 +14,7 @@ def derive_reference_date(train_df: pd.DataFrame) -> Optional[pd.Timestamp]:
     ref_date = account_creation.max()
     if not pd.isna(ref_date):
         return ref_date
-    tzinfo = account_creation.dt.tz
-    fallback = pd.Timestamp("1970-01-01")
-    if tzinfo is not None:
-        return fallback.tz_localize(tzinfo)
-    return fallback
+    return None
 
 
 class BotFeatureExtractor:
