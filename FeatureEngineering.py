@@ -11,16 +11,24 @@ def derive_reference_date(train_df: pd.DataFrame) -> Optional[pd.Timestamp]:
         train_df['account_creation_date'],
         errors='coerce'
     )
-    if account_creation.notna().any():
-        return account_creation.max()
+    ref_date = account_creation.max()
+    if not pd.isna(ref_date):
+        return ref_date
     tzinfo = account_creation.dt.tz
+    fallback = pd.Timestamp("1970-01-01")
     if tzinfo is not None:
-        return pd.Timestamp.now(tz=tzinfo)
-    return pd.Timestamp.now()
+        return fallback.tz_localize(tzinfo)
+    return fallback
 
 
 class BotFeatureExtractor:
     """Extract features for bot detection from TwiBot-20 data."""
+
+    # Heuristic caps to limit extreme outliers consistently across splits.
+    FOLLOWERS_FRIENDS_RATIO_CAP = 1000
+    TWEETS_PER_DAY_CAP = 1000
+    FAVOURITES_PER_DAY_CAP = 1000
+    FOLLOWERS_PER_DAY_CAP = 10000
 
     def __init__(self, reference_date: Optional[pd.Timestamp] = None):
         self.feature_names: List[str] = []
@@ -76,8 +84,10 @@ class BotFeatureExtractor:
         if 'followers_count' in df.columns and 'friends_count' in df.columns:
             # Avoid division by zero and cap extreme values
             ratio = df['followers_count'] / (df['friends_count'] + 1)
-            # Cap at a reasonable maximum (e.g., 1000x more followers than friends)
-            df['followers_to_friends_ratio'] = ratio.clip(upper=1000)
+            # Cap at a reasonable maximum to limit outliers
+            df['followers_to_friends_ratio'] = ratio.clip(
+                upper=self.FOLLOWERS_FRIENDS_RATIO_CAP
+            )
             self.feature_names.append('followers_to_friends_ratio')
         
         # Listed count (how many lists user is on - popularity indicator)
@@ -170,20 +180,25 @@ class BotFeatureExtractor:
         # Tweets per day (activity rate)
         if 'statuses_count' in df.columns and 'account_age_days' in df.columns:
             tweets_per_day = df['statuses_count'] / df['account_age_days']
-            # Cap at reasonable maximum (e.g., 1000 tweets per day)
-            df['tweets_per_day'] = tweets_per_day.clip(upper=1000).replace([np.inf, -np.inf], 0)
+            df['tweets_per_day'] = tweets_per_day.clip(
+                upper=self.TWEETS_PER_DAY_CAP
+            ).replace([np.inf, -np.inf], 0)
             self.feature_names.append('tweets_per_day')
         
         # Favourites per day
         if 'favourites_count' in df.columns and 'account_age_days' in df.columns:
             fav_per_day = df['favourites_count'] / df['account_age_days']
-            df['favourites_per_day'] = fav_per_day.clip(upper=1000).replace([np.inf, -np.inf], 0)
+            df['favourites_per_day'] = fav_per_day.clip(
+                upper=self.FAVOURITES_PER_DAY_CAP
+            ).replace([np.inf, -np.inf], 0)
             self.feature_names.append('favourites_per_day')
         
         # Followers per day (growth rate)
         if 'followers_count' in df.columns and 'account_age_days' in df.columns:
             followers_per_day = df['followers_count'] / df['account_age_days']
-            df['followers_per_day'] = followers_per_day.clip(upper=10000).replace([np.inf, -np.inf], 0)
+            df['followers_per_day'] = followers_per_day.clip(
+                upper=self.FOLLOWERS_PER_DAY_CAP
+            ).replace([np.inf, -np.inf], 0)
             self.feature_names.append('followers_per_day')
         
         return df

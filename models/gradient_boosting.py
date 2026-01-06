@@ -70,10 +70,14 @@ class GradientBoostingModel(BaseModel):
                 cls: total / (len(classes) * count) for cls, count in zip(classes, counts)
             }
         elif isinstance(class_weight, dict):
-            weight_map = class_weight
+            weight_map = {int(k): v for k, v in class_weight.items()}
         else:
             raise ValueError(f"Unsupported class_weight value: {class_weight}")
-        return np.array([weight_map.get(int(label), 1.0) for label in y], dtype=float)
+        y_int = np.asarray(y).astype(int)
+        unknown = sorted(set(np.unique(y_int)) - set(weight_map.keys()))
+        if unknown:
+            raise ValueError(f"Unexpected class labels: {unknown}")
+        return np.array([weight_map[int(label)] for label in y_int], dtype=float)
 
     def fit(
         self,
