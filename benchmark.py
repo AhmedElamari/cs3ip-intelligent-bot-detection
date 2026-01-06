@@ -19,7 +19,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 # Project imports
-from DataLoader import load_twibot_splits_as_dict, check_twibot_data_available
+from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from config import Config, load_config
@@ -35,37 +35,10 @@ TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 LOGGER = logging.getLogger(__name__)
 
 
-def resolve_data_source() -> dict:
-    """
-    Determine best available data source.
-    
-    Returns:
-        dict with 'type' ('splits'), 'path', and 'count'
-    """
-    availability = check_twibot_data_available()
-    
-    # Require split files with labels
-    if availability['total_split_samples'] > 0:
-        splits_info = availability['splits_available']
-        has_labels = all(s['has_labels'] for s in splits_info.values() if s['exists'])
-        if has_labels:
-            return {
-                'type': 'splits',
-                'path': TWIBOT20_DATA_DIR,
-                'count': availability['total_split_samples']
-            }
-    
-    raise FileNotFoundError(
-        "No TwiBot-20 dataset found. Expected split files in:\n"
-        f"  {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)"
-    )
-
-
 def load_data() -> dict:
     """Load TwiBot-20 JSON split data from the local data/ directory."""
-    source = resolve_data_source()
-    print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-    splits = load_twibot_splits_as_dict(source['path'])
+    print(f"Detected pre-split dataset under {TWIBOT20_DATA_DIR} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(TWIBOT20_DATA_DIR)
     for name, df in splits.items():
         print(f"{name} split: {len(df)} samples")
     return splits
@@ -545,9 +518,7 @@ def main():
     output_dir = output_dir / f'benchmark_{timestamp}'
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Determine data source for logging
-    source = resolve_data_source()
-    data_source_str = str(source['path'])
+    data_source_str = str(TWIBOT20_DATA_DIR)
     
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
