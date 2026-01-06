@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 MIN_SKLEARN_VERSION = "1.5.0"
-MIN_NUMPY_VERSION = "2.3.5"
+MIN_NUMPY_VERSION = "1.23.5"
 
 
 def _version_at_least(version_str, minimum):

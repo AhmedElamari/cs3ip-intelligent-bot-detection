@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 Minimum:
 ```bash
-pip install pandas numpy>=2.3.5 scikit-learn>=1.5.0
+pip install pandas numpy>=1.23.5,<2.0 scikit-learn>=1.5.0
 ```
 
 Optional XAI tooling:
