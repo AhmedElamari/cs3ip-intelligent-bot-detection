@@ -60,8 +60,8 @@ class GradientBoostingModel(BaseModel):
     def _compute_sample_weight(y: np.ndarray, class_weight) -> Optional[np.ndarray]:
         if class_weight is None:
             return None
+        y_int = np.asarray(y).astype(int)
         if class_weight == 'balanced':
-            y_int = np.asarray(y).astype(int)
             classes, counts = np.unique(y_int, return_counts=True)
             if len(classes) == 0:
                 return None
@@ -73,7 +73,6 @@ class GradientBoostingModel(BaseModel):
             weight_map = {int(k): v for k, v in class_weight.items()}
         else:
             raise ValueError(f"Unsupported class_weight value: {class_weight}")
-        y_int = np.asarray(y).astype(int)
         unknown = sorted(set(np.unique(y_int)) - set(weight_map.keys()))
         if unknown:
             raise ValueError(f"Unexpected class labels: {unknown}")
