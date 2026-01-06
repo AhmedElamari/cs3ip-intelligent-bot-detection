@@ -67,7 +67,7 @@ class GradientBoostingModel(BaseModel):
                 return None
             total = len(y_int)
             weight_map = {
-                cls: total / (len(classes) * count) for cls, count in zip(classes, counts, strict=True)
+                cls: total / (len(classes) * count) for cls, count in zip(classes, counts)
             }
         elif isinstance(class_weight, dict):
             weight_map = {int(k): v for k, v in class_weight.items()}
