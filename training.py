@@ -1,5 +1,11 @@
 """
 Training helpers for the single-model pipeline.
+
+This module supports the main CLI pipeline by encapsulating model selection,
+training, and evaluation in one place. The single-model pipeline refers to the
+`main.py` workflow that trains one chosen estimator and reports validation/test
+metrics. The primary entry point is `train_and_evaluate`, which expects binary
+labels (0/1), fits the requested model, and prints standard evaluation output.
 """
 
 import numpy as np
