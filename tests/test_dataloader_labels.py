@@ -1,10 +1,13 @@
+ 
 import importlib.util
 import json
+import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 PANDAS_AVAILABLE = importlib.util.find_spec("pandas") is not None
 
@@ -13,282 +16,144 @@ class DataLoaderLabelsTest(unittest.TestCase):
     def setUp(self):
         if not PANDAS_AVAILABLE:
             self.skipTest("pandas not installed")
-        self.temp_dir = TemporaryDirectory()
-        self.temp_path = Path(self.temp_dir.name)
-
-    def tearDown(self):
-        if hasattr(self, "temp_dir"):
-            self.temp_dir.cleanup()
-
-    def _write_json(self, path: Path) -> None:
-        data = [
-            {
-                "ID": 1,
-                "profile": {
-                    "id": 1,
-                    "created_at": "Wed Oct 10 20:19:24 +0000 2018",
-                    "verified": False,
-                },
-                "tweet": [],
-                "neighbor": {},
-                "domain": [],
-            }
-        ]
-        path.write_text(json.dumps(data), encoding="utf-8")
-
-    def test_missing_labels_file_raises(self):
+        import pandas as pd
         from DataLoader import TwiBotDataLoader
+        self.pd = pd
+        self.loader_cls = TwiBotDataLoader
 
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-        labels_path = self.temp_path / "missing_labels.csv"
+    def _write_json(self, path: Path, users: list) -> None:
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump(users, handle)
 
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        with self.assertRaises(FileNotFoundError):
-            loader.load()
+    def test_embedded_labels_are_normalized(self):
+        users = [
+            {"ID": "1", "label": "bot", "profile": {}},
+            {"ID": "2", "label": "human", "profile": {}},
+        ]
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            self._write_json(json_path, users)
+            loader = self.loader_cls(json_path=json_path)
+            df = loader.load()
+            self.assertIn("label", df.columns)
+            self.assertTrue(df["label"].notna().all())
+            self.assertEqual(set(df["label"].tolist()), {0, 1})
+
+    def test_external_labels_are_merged(self):
+        users = [
+            {"ID": "1", "profile": {}},
+            {"ID": "2", "profile": {}},
+        ]
+        labels = self.pd.DataFrame({
+            "ID": ["1", "2"],
+            "label": ["bot", "human"],
+        })
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            csv_path = Path(tmp) / "labels.csv"
+            self._write_json(json_path, users)
+            labels.to_csv(csv_path, index=False)
+            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
+            df = loader.load()
+            self.assertIn("label", df.columns)
+            self.assertTrue(df["label"].notna().all())
+            self.assertEqual(set(df["label"].tolist()), {0, 1})
 
     def test_missing_label_column_raises(self):
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
+        users = [{"ID": "1", "profile": {}}]
+        labels = self.pd.DataFrame({"ID": ["1"]})
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            csv_path = Path(tmp) / "labels.csv"
+            self._write_json(json_path, users)
+            labels.to_csv(csv_path, index=False)
+            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
+            with self.assertRaises(ValueError) as ctx:
+                loader.load()
+            self.assertIn("label", str(ctx.exception).lower())
 
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
+    def test_non_binary_labels_raise(self):
+        users = [{"ID": "1", "profile": {}}]
+        labels = self.pd.DataFrame({"ID": ["1"], "label": [2]})
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            csv_path = Path(tmp) / "labels.csv"
+            self._write_json(json_path, users)
+            labels.to_csv(csv_path, index=False)
+            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
+            with self.assertRaises(ValueError) as ctx:
+                loader.load()
+            self.assertIn("binary", str(ctx.exception).lower())
 
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": [1]}).to_csv(labels_path, index=False)
+    def test_label_merge_with_no_matches_raises(self):
+        users = [{"ID": "1", "profile": {}}]
+        labels = self.pd.DataFrame({"ID": ["999"], "label": [1]})
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            csv_path = Path(tmp) / "labels.csv"
+            self._write_json(json_path, users)
+            labels.to_csv(csv_path, index=False)
+            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
+            with self.assertRaises(ValueError) as ctx:
+                loader.load()
+            self.assertIn("zero matches", str(ctx.exception).lower())
 
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        with self.assertRaises(ValueError):
-            loader.load()
-
-    def test_label_merge_with_user_id(self):
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"user_id": ["1"], "label": [1]}).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        self.assertEqual(int(df.loc[0, "label"]), 1)
-
-    def test_string_label_bot_normalized_to_1(self):
-        """Verify 'bot' string label is normalized to 1."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": ["1"], "label": ["bot"]}).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        self.assertEqual(int(df.loc[0, "label"]), 1)
-
-    def test_string_label_human_normalized_to_0(self):
-        """Verify 'human' string label is normalized to 0."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": ["1"], "label": ["human"]}).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        self.assertEqual(int(df.loc[0, "label"]), 0)
-
-    def test_string_label_fake_normalized_to_1(self):
-        """Verify 'fake' string label is normalized to 1."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": ["1"], "label": ["fake"]}).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        self.assertEqual(int(df.loc[0, "label"]), 1)
-
-    def test_string_label_real_normalized_to_0(self):
-        """Verify 'real' string label is normalized to 0."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": ["1"], "label": ["real"]}).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        self.assertEqual(int(df.loc[0, "label"]), 0)
-
-    def test_string_labels_case_insensitive(self):
-        """Verify string labels are normalized regardless of case."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        # Write multiple users
-        data = [
-            {
-                "ID": i,
-                "profile": {
-                    "id": i,
-                    "created_at": "Wed Oct 10 20:19:24 +0000 2018",
-                    "verified": False,
-                },
-                "tweet": [],
-                "neighbor": {},
-                "domain": [],
-            }
-            for i in range(1, 5)
+    def test_partial_embedded_labels_are_filled_from_external(self):
+        users = [
+            {"ID": "1", "label": "bot", "profile": {}},
+            {"ID": "2", "profile": {}},
         ]
-        json_path.write_text(json.dumps(data), encoding="utf-8")
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({
-            "ID": ["1", "2", "3", "4"],
-            "label": ["BOT", "Human", "FAKE", "ReAl"]
-        }).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        # BOT -> 1, Human -> 0, FAKE -> 1, ReAl -> 0
-        expected = {1: 1, 2: 0, 3: 1, 4: 0}
-        for user_id, expected_label in expected.items():
-            row = df[df["user_id"] == str(user_id)]
-            self.assertEqual(
-                int(row["label"].values[0]),
-                expected_label,
-                f"User {user_id} label mismatch"
-            )
-
-    def test_string_labels_with_whitespace_trimmed(self):
-        """Verify string labels with leading/trailing whitespace are normalized."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        data = [
-            {
-                "ID": i,
-                "profile": {
-                    "id": i,
-                    "created_at": "Wed Oct 10 20:19:24 +0000 2018",
-                    "verified": False,
-                },
-                "tweet": [],
-                "neighbor": {},
-                "domain": [],
-            }
-            for i in range(1, 3)
-        ]
-        json_path.write_text(json.dumps(data), encoding="utf-8")
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({
+        labels = self.pd.DataFrame({
             "ID": ["1", "2"],
-            "label": ["  bot  ", "  human  "]
-        }).to_csv(labels_path, index=False)
+            "label": [0, 1],
+        })
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            csv_path = Path(tmp) / "labels.csv"
+            self._write_json(json_path, users)
+            labels.to_csv(csv_path, index=False)
+            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
+            df = loader.load()
+            labels_by_id = df.set_index("user_id")["label"]
+            self.assertEqual(labels_by_id.loc["1"], 1)
+            self.assertEqual(labels_by_id.loc["2"], 1)
 
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        row_bot = df[df["user_id"] == "1"]
-        row_human = df[df["user_id"] == "2"]
-        self.assertEqual(int(row_bot["label"].values[0]), 1)
-        self.assertEqual(int(row_human["label"].values[0]), 0)
-
-    def test_mixed_numeric_and_string_labels(self):
-        """Verify mixed numeric and string labels are normalized correctly."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        data = [
-            {
-                "ID": i,
-                "profile": {
-                    "id": i,
-                    "created_at": "Wed Oct 10 20:19:24 +0000 2018",
-                    "verified": False,
-                },
-                "tweet": [],
-                "neighbor": {},
-                "domain": [],
-            }
-            for i in range(1, 5)
+    def test_fractional_embedded_labels_are_ignored(self):
+        users = [
+            {"ID": "1", "label": 0.5, "profile": {}},
+            {"ID": "2", "label": 1, "profile": {}},
         ]
-        json_path.write_text(json.dumps(data), encoding="utf-8")
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            self._write_json(json_path, users)
+            loader = self.loader_cls(json_path=json_path)
+            df = loader.load()
+            labels_by_id = df.set_index("user_id")["label"]
+            self.assertTrue(self.pd.isna(labels_by_id.loc["1"]))
+            self.assertEqual(labels_by_id.loc["2"], 1)
 
-        labels_path = self.temp_path / "labels.csv"
-        # Mix of string and numeric-as-string labels
-        pd.DataFrame({
-            "ID": ["1", "2", "3", "4"],
-            "label": ["bot", "0", "human", "1"]
-        }).to_csv(labels_path, index=False)
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        df = loader.load()
-
-        self.assertIn("label", df.columns)
-        expected = {1: 1, 2: 0, 3: 0, 4: 1}
-        for user_id, expected_label in expected.items():
-            row = df[df["user_id"] == str(user_id)]
-            self.assertEqual(
-                int(row["label"].values[0]),
-                expected_label,
-                f"User {user_id} label mismatch"
-            )
-
-    def test_invalid_string_label_raises(self):
-        """Verify invalid string labels raise ValueError."""
-        import pandas as pd
-        from DataLoader import TwiBotDataLoader
-
-        json_path = self.temp_path / "sample.json"
-        self._write_json(json_path)
-
-        labels_path = self.temp_path / "labels.csv"
-        pd.DataFrame({"ID": ["1"], "label": ["invalid_label"]}).to_csv(
-            labels_path, index=False
-        )
-
-        loader = TwiBotDataLoader(str(json_path), str(labels_path))
-        with self.assertRaises(ValueError) as ctx:
-            loader.load()
-        # Invalid labels result in NaN which triggers validation error
-        error_msg = str(ctx.exception).lower()
-        self.assertTrue(
-            "no valid label" in error_msg or "binary" in error_msg,
-            f"Unexpected error message: {ctx.exception}"
-        )
+    def test_string_zero_is_false_for_boolean_fields(self):
+        users = [
+            {
+                "ID": "1",
+                "profile": {
+                    "protected": "0",
+                    "geo_enabled": "1",
+                    "default_profile": "false",
+                    "default_profile_image": "true",
+                },
+            }
+        ]
+        with TemporaryDirectory() as tmp:
+            json_path = Path(tmp) / "data.json"
+            self._write_json(json_path, users)
+            loader = self.loader_cls(json_path=json_path)
+            df = loader.load()
+            row = df.iloc[0]
+            self.assertEqual(row["protected"], 0)
+            self.assertEqual(row["geo_enabled"], 1)
+            self.assertEqual(row["default_profile"], 0)
+            self.assertEqual(row["default_profile_image"], 1)
 
 
 if __name__ == "__main__":

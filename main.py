@@ -9,45 +9,23 @@ import argparse
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    classification_report, confusion_matrix
-)
-
-from DataLoader import TwiBotDataLoader, load_twibot_json
-from FeatureEngineering import BotFeatureExtractor
+from typing import Optional
+from DataLoader import load_twibot_splits_as_dict
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
+from training import train_and_evaluate
 
 REPO_ROOT = Path(__file__).resolve().parent
-TWIBOT20_DATA_PATH = REPO_ROOT / "TwiBot-20_sample.json"
+TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 
 
-def resolve_twibot20_path() -> Path:
-    if not TWIBOT20_DATA_PATH.exists():
-        raise FileNotFoundError(
-            "TwiBot-20 dataset not found. Expected file at "
-            f"{TWIBOT20_DATA_PATH}"
-        )
-    return TWIBOT20_DATA_PATH
-
-
-def load_and_prepare_data(json_path: str, label_path: str = None) -> pd.DataFrame:
-    """Load JSON data and prepare it for processing."""
-    print(f"Loading data from: {json_path}")
-    if label_path:
-        print(f"Loading labels from: {label_path}")
-    
-    loader = TwiBotDataLoader(json_path, label_path)
-    df = loader.load()
-    
-    print(f"Loaded {len(df)} records")
-    print(f"Columns: {df.columns.tolist()}")
-    
-    return df
+def load_and_prepare_data() -> dict:
+    """Load TwiBot-20 JSON split data from the local data/ directory."""
+    print(f"Detected pre-split dataset under {TWIBOT20_DATA_DIR} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(TWIBOT20_DATA_DIR)
+    for name, df in splits.items():
+        print(f"{name} split: {len(df)} samples")
+    return splits
 
 
 def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> pd.DataFrame:
@@ -63,186 +41,99 @@ def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> 
     return df
 
 
-def train_and_evaluate(
-    X_train, X_val, X_test,
-    y_train, y_val, y_test,
-    model_type: str = 'random_forest',
-    class_weights: dict = None
-) -> dict:
-    """Train model and evaluate on validation and test sets."""
-    
-    # Select model
-    if model_type == 'random_forest':
-        model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            class_weight=class_weights,
-            random_state=2112,
-            n_jobs=-1
-        )
-    elif model_type == 'logistic_regression':
-        model = LogisticRegression(
-            class_weight=class_weights,
-            random_state=2112,
-            max_iter=1000
-        )
-    elif model_type == 'svm':
-        model = SVC(
-            class_weight=class_weights,
-            random_state=2112,
-            kernel='rbf'
-        )
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
-    
-    print(f"\nTraining {model_type}...")
-    model.fit(X_train, y_train)
-    
-    # Evaluate on validation set
-    y_val_pred = model.predict(X_val)
-    val_metrics = {
-        'accuracy': accuracy_score(y_val, y_val_pred),
-        'precision': precision_score(y_val, y_val_pred, average='binary', zero_division=0),
-        'recall': recall_score(y_val, y_val_pred, average='binary', zero_division=0),
-        'f1': f1_score(y_val, y_val_pred, average='binary', zero_division=0)
-    }
-    
-    print(f"\nValidation Results:")
-    print(f"  Accuracy:  {val_metrics['accuracy']:.4f}")
-    print(f"  Precision: {val_metrics['precision']:.4f}")
-    print(f"  Recall:    {val_metrics['recall']:.4f}")
-    print(f"  F1 Score:  {val_metrics['f1']:.4f}")
-    
-    # Evaluate on test set
-    y_test_pred = model.predict(X_test)
-    test_metrics = {
-        'accuracy': accuracy_score(y_test, y_test_pred),
-        'precision': precision_score(y_test, y_test_pred, average='binary', zero_division=0),
-        'recall': recall_score(y_test, y_test_pred, average='binary', zero_division=0),
-        'f1': f1_score(y_test, y_test_pred, average='binary', zero_division=0)
-    }
-    
-    print(f"\nTest Results:")
-    print(f"  Accuracy:  {test_metrics['accuracy']:.4f}")
-    print(f"  Precision: {test_metrics['precision']:.4f}")
-    print(f"  Recall:    {test_metrics['recall']:.4f}")
-    print(f"  F1 Score:  {test_metrics['f1']:.4f}")
-    
-    print(f"\nClassification Report (Test):")
-    test_labels = np.unique(np.concatenate([y_test, y_test_pred]))
-    target_names = [
-        "Human" if lbl == 0 else "Bot" if lbl == 1 else str(lbl)
-        for lbl in test_labels
-    ]
-    print(
-        classification_report(
-            y_test,
-            y_test_pred,
-            labels=test_labels,
-            target_names=target_names,
-            zero_division=0
-        )
-    )
-    
-    print(f"\nConfusion Matrix (Test):")
-    print(confusion_matrix(y_test, y_test_pred))
-    
-    return {
-        'model': model,
-        'val_metrics': val_metrics,
-        'test_metrics': test_metrics
-    }
 
 
 def run_pipeline(
-    label_path: str = None,
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
-    num_features: int = None
+    num_features: Optional[int] = None
 ):
-    """Run the complete bot detection pipeline on TwiBot-20."""
+    """Run the complete bot detection pipeline on TwiBot-20.
+    
+    Args:
+        model_type: Model to use ('random_forest', 'logistic_regression', 'svm')
+        use_smote: Apply SMOTE for class balancing
+        use_scaling: Apply feature scaling
+        num_features: Number of features to select (None = all)
+    """
     
     print("=" * 60)
     print("BOT DETECTION PIPELINE")
     print("=" * 60)
     
     # Step 1: Load data
-    json_path = resolve_twibot20_path()
-    print(f"Using TwiBot-20 dataset: {json_path}")
-    df = load_and_prepare_data(str(json_path), label_path)
-    
-    # Check if labels exist
-    if 'label' not in df.columns:
-        if label_path:
+    splits = load_and_prepare_data()
+
+    split_frames = {name: splits[name].copy() for name in ('train', 'val', 'test')}
+
+    # Check for labels
+    for name, df in split_frames.items():
+        if 'label' not in df.columns:
+            raise ValueError(f"No 'label' column found in {name} split")
+        df = df.dropna(subset=['label'])
+        if df.empty:
             raise ValueError(
-                "Labels file was provided but no 'label' column was found "
-                "after loading. Check the labels file and ID column mapping."
+                f"{name} split has no labeled rows after dropping missing labels."
             )
-        print("\nWARNING: No 'label' column found in data.")
-        print("Please provide a labels file with --labels argument.")
-        print("For demo purposes, creating synthetic labels...")
-        # Create synthetic labels for demo (random)
-        np.random.seed(2112)
-        df['label'] = np.random.randint(0, 2, size=len(df))
-        print(f"Created synthetic labels: {df['label'].value_counts().to_dict()}")
-    
-    df = df.dropna(subset=['label'])
-    if df.empty:
-        raise ValueError(
-            "No labeled records available after loading labels. "
-            "Check that label IDs match the TwiBot IDs."
-        )
-    
-    indices = df.index.to_numpy()
-    labels = df['label'].to_numpy()
-    idx_temp, idx_test, labels_temp, _ = train_test_split(
-        indices, labels, test_size=0.1, random_state=2112
-    )
-    val_ratio = 0.2 / (1 - 0.1)
-    idx_train, idx_val, _, _ = train_test_split(
-        idx_temp, labels_temp, test_size=val_ratio, random_state=2112
-    )
-    
-    # Step 2: Feature engineering
-    reference_date = None
-    if 'account_creation_date' in df.columns:
-        account_creation = pd.to_datetime(
-            df.loc[idx_train, 'account_creation_date'], errors='coerce'
-        )
-        if account_creation.notna().any():
-            reference_date = account_creation.max()
-        else:
-            full_account_creation = pd.to_datetime(
-                df['account_creation_date'], errors='coerce'
-            )
-            reference_date = pd.Timestamp.utcnow()
-            if full_account_creation.dt.tz is not None:
-                reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
-    df = engineer_features(df, reference_date=reference_date)
-    
-    # Step 3: Preprocessing
+        split_frames[name] = df
+
+    train_df = split_frames['train']
+    val_df = split_frames['val']
+    test_df = split_frames['test']
+
+    # Derive reference date from training data only
+    reference_date = derive_reference_date(train_df)
+
+    # Feature engineering on each split
+    print("\nExtracting features...")
+    train_df = engineer_features(train_df, reference_date=reference_date)
+    val_df = engineer_features(val_df, reference_date=reference_date)
+    test_df = engineer_features(test_df, reference_date=reference_date)
+
+    # Preprocessing
     print("\nPreprocessing data...")
     detector = BotDetector()
-    detector.data = df
-    df = detector.preprocess()
-    
-    # Step 4: Split data
-    print("\nSplitting data (70% train, 20% validation, 10% test)...")
+
+    detector.data = train_df
+    train_df = detector.preprocess()
+
+    detector.data = val_df
+    val_df = detector.preprocess()
+
+    detector.data = test_df
+    test_df = detector.preprocess()
+
+    # Extract features
     feature_names = (
-        df.drop(columns=['label'])
+        train_df.drop(columns=['label'])
         .select_dtypes(include=[np.number])
         .columns
         .tolist()
     )
-    X = df[feature_names]
-    y = df['label']
-    X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
-    y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
-    
+
+    for df_name, df in (('val', val_df), ('test', test_df)):
+        missing = [col for col in feature_names if col not in df.columns]
+        if missing:
+            df[missing] = 0
+        if df_name == 'val':
+            val_df = df
+        else:
+            test_df = df
+
+    X_train = train_df[feature_names]
+    y_train = train_df['label']
+    X_val = val_df[feature_names]
+    y_val = val_df['label']
+    X_test = test_df[feature_names]
+    y_test = test_df['label']
+
+    print("\nUsing original splits:")
     print(f"Training set:   {len(X_train)} samples")
     print(f"Validation set: {len(X_val)} samples")
     print(f"Test set:       {len(X_test)} samples")
+    
+    # Post-processing steps
     
     # Step 5: Handle class imbalance (optional)
     if use_smote:
@@ -250,9 +141,13 @@ def run_pipeline(
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method='smote')
         print(f"After SMOTE: {len(X_train)} training samples")
     
-    # Step 6: Feature scaling (optional, for logistic regression/SVM)
-    if use_scaling:
-        print("\nApplying feature scaling...")
+    # Step 6: Feature scaling (recommended for logistic regression/SVM)
+    should_scale = use_scaling or model_type in ('logistic_regression', 'svm')
+    if should_scale:
+        if use_scaling:
+            print("\nApplying feature scaling...")
+        else:
+            print(f"\nApplying feature scaling for {model_type}...")
         X_train, X_val, X_test = detector.scale_features(X_train, X_val, X_test)
     
     # Step 7: Feature selection (optional)
@@ -286,12 +181,6 @@ def main():
         description='Bot Detection Pipeline (TwiBot-20 only)'
     )
     parser.add_argument(
-        '--labels', '-l',
-        type=str,
-        default=None,
-        help='Path to labels CSV file (with ID and label columns)'
-    )
-    parser.add_argument(
         '--model', '-m',
         type=str,
         default='random_forest',
@@ -318,7 +207,6 @@ def main():
     args = parser.parse_args()
     
     run_pipeline(
-        label_path=args.labels,
         model_type=args.model,
         use_smote=args.smote,
         use_scaling=args.scale,
