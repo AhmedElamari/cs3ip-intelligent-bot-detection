@@ -3,6 +3,22 @@ import numpy as np
 from typing import Optional, List
 
 
+def derive_reference_date(train_df: pd.DataFrame) -> Optional[pd.Timestamp]:
+    """Derive a leakage-safe reference date from the training split."""
+    if 'account_creation_date' not in train_df.columns:
+        return None
+    account_creation = pd.to_datetime(
+        train_df['account_creation_date'],
+        errors='coerce'
+    )
+    if account_creation.notna().any():
+        return account_creation.max()
+    tzinfo = account_creation.dt.tz
+    if tzinfo is not None:
+        return pd.Timestamp.now(tz=tzinfo)
+    return pd.Timestamp.now()
+
+
 class BotFeatureExtractor:
     """Extract features for bot detection from TwiBot-20 data."""
 

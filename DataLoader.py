@@ -8,7 +8,6 @@ __all__ = [
     "TwiBotDataLoader",
     "load_twibot_json",
     "load_twibot_splits_as_dict",
-    "check_twibot_data_available",
 ]
 
 
@@ -367,43 +366,3 @@ def load_twibot_splits_as_dict(
     return splits
 
 
-def check_twibot_data_available() -> dict:
-    """
-    Check what TwiBot-20 data files are available.
-    
-    Returns:
-        Dictionary with file availability and sample counts for splits
-    """
-    repo_root = Path(__file__).resolve().parent
-    data_dir = repo_root / 'data'
-    
-    result = {
-        'splits_available': {},
-        'total_split_samples': 0
-    }
-    
-    for split in ['train', 'dev', 'test']:
-        split_path = data_dir / f'{split}.json'
-        if split_path.exists():
-            try:
-                with open(split_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                count = len(data)
-                has_labels = any('label' in user for user in data[:10])
-            except Exception:
-                count = 0
-                has_labels = False
-            result['splits_available'][split] = {
-                'exists': True,
-                'count': count,
-                'has_labels': has_labels
-            }
-            result['total_split_samples'] += count
-        else:
-            result['splits_available'][split] = {
-                'exists': False,
-                'count': 0,
-                'has_labels': False
-            }
-    
-    return result

@@ -15,12 +15,10 @@ class StratifiedSplitTest(unittest.TestCase):
         if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE):
             self.skipTest("Required dependencies not installed")
         import numpy as np
-        import main
-        import benchmark
+        import pipeline_utils
         self.np = np
         self.splitters = (
-            main._safe_stratified_split,
-            benchmark._safe_stratified_split,
+            pipeline_utils.safe_stratified_split,
         )
 
     def _assert_split(self, splitter, labels, split_name, test_size):

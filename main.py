@@ -6,59 +6,23 @@ JSON loading -> Feature engineering -> Preprocessing -> Model training -> Evalua
 """
 
 import argparse
-import logging
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.svm import SVC
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, f1_score,
-    classification_report, confusion_matrix
-)
-
-from DataLoader import load_twibot_splits_as_dict, check_twibot_data_available
-from FeatureEngineering import BotFeatureExtractor
+from typing import Optional
+from DataLoader import load_twibot_splits_as_dict
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
+from training import train_and_evaluate
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
-LOGGER = logging.getLogger(__name__)
-
-
-def resolve_data_source() -> dict:
-    """
-    Determine best available data source.
-    
-    Returns:
-        dict with 'type' ('splits'), 'path', and 'count'
-    """
-    availability = check_twibot_data_available()
-    
-    # Require split files with labels
-    if availability['total_split_samples'] > 0:
-        splits_info = availability['splits_available']
-        has_labels = all(s['has_labels'] for s in splits_info.values() if s['exists'])
-        if has_labels:
-            return {
-                'type': 'splits',
-                'path': TWIBOT20_DATA_DIR,
-                'count': availability['total_split_samples']
-            }
-    
-    raise FileNotFoundError(
-        "No TwiBot-20 dataset found. Expected split files in:\n"
-        f"  {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)"
-    )
 
 
 def load_and_prepare_data() -> dict:
     """Load TwiBot-20 JSON split data from the local data/ directory."""
-    source = resolve_data_source()
-    print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-    splits = load_twibot_splits_as_dict(source['path'])
+    print(f"Detected pre-split dataset under {TWIBOT20_DATA_DIR} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(TWIBOT20_DATA_DIR)
     for name, df in splits.items():
         print(f"{name} split: {len(df)} samples")
     return splits
@@ -77,147 +41,13 @@ def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> 
     return df
 
 
-def train_and_evaluate(
-    X_train, X_val, X_test,
-    y_train, y_val, y_test,
-    model_type: str = 'random_forest',
-    class_weights: dict = None
-) -> dict:
-    """Train model and evaluate on validation and test sets."""
-    
-    # Select model
-    if model_type == 'random_forest':
-        model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            class_weight=class_weights,
-            random_state=2112,
-            n_jobs=-1
-        )
-    elif model_type == 'logistic_regression':
-        model = LogisticRegression(
-            class_weight=class_weights,
-            random_state=2112,
-            max_iter=1000
-        )
-    elif model_type == 'svm':
-        model = SVC(
-            class_weight=class_weights,
-            random_state=2112,
-            kernel='rbf'
-        )
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
-    
-    print(f"\nTraining {model_type}...")
-    model.fit(X_train, y_train)
-    
-    # Evaluate on validation set
-    y_val_pred = model.predict(X_val)
-    val_metrics = {
-        'accuracy': accuracy_score(y_val, y_val_pred),
-        'precision': precision_score(y_val, y_val_pred, average='binary', zero_division=0),
-        'recall': recall_score(y_val, y_val_pred, average='binary', zero_division=0),
-        'f1': f1_score(y_val, y_val_pred, average='binary', zero_division=0)
-    }
-    
-    print(f"\nValidation Results:")
-    print(f"  Accuracy:  {val_metrics['accuracy']:.4f}")
-    print(f"  Precision: {val_metrics['precision']:.4f}")
-    print(f"  Recall:    {val_metrics['recall']:.4f}")
-    print(f"  F1 Score:  {val_metrics['f1']:.4f}")
-    
-    # Evaluate on test set
-    y_test_pred = model.predict(X_test)
-    test_metrics = {
-        'accuracy': accuracy_score(y_test, y_test_pred),
-        'precision': precision_score(y_test, y_test_pred, average='binary', zero_division=0),
-        'recall': recall_score(y_test, y_test_pred, average='binary', zero_division=0),
-        'f1': f1_score(y_test, y_test_pred, average='binary', zero_division=0)
-    }
-    
-    print(f"\nTest Results:")
-    print(f"  Accuracy:  {test_metrics['accuracy']:.4f}")
-    print(f"  Precision: {test_metrics['precision']:.4f}")
-    print(f"  Recall:    {test_metrics['recall']:.4f}")
-    print(f"  F1 Score:  {test_metrics['f1']:.4f}")
-    
-    print(f"\nClassification Report (Test):")
-    test_labels = np.unique(np.concatenate([y_test, y_test_pred]))
-    target_names = [
-        "Human" if lbl == 0 else "Bot" if lbl == 1 else str(lbl)
-        for lbl in test_labels
-    ]
-    print(
-        classification_report(
-            y_test,
-            y_test_pred,
-            labels=test_labels,
-            target_names=target_names,
-            zero_division=0
-        )
-    )
-    
-    print(f"\nConfusion Matrix (Test):")
-    print(confusion_matrix(y_test, y_test_pred))
-    
-    return {
-        'model': model,
-        'val_metrics': val_metrics,
-        'test_metrics': test_metrics
-    }
-
-
-def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
-    """Derive a leakage-safe reference date from the training split."""
-    if 'account_creation_date' not in train_df.columns:
-        return None
-    account_creation = pd.to_datetime(
-        train_df['account_creation_date'],
-        errors='coerce'
-    )
-    if account_creation.notna().any():
-        ref_date = account_creation.max()
-        if ref_date is not None and getattr(ref_date, "tz", None) is None:
-            ref_date = ref_date.tz_localize("UTC")
-        return ref_date
-    return None
-
-
-def _safe_stratified_split(
-    indices: np.ndarray,
-    labels: np.ndarray,
-    test_size: float,
-    random_state: int,
-    split_name: str
-):
-    try:
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=labels
-        )
-    except ValueError as exc:
-        LOGGER.warning(
-            "Stratified %s split failed (%s). Falling back to unstratified split.",
-            split_name,
-            exc
-        )
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state
-        )
 
 
 def run_pipeline(
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
-    num_features: int = None
+    num_features: Optional[int] = None
 ):
     """Run the complete bot detection pipeline on TwiBot-20.
     
@@ -246,7 +76,7 @@ def run_pipeline(
         df.dropna(subset=['label'], inplace=True)
 
     # Derive reference date from training data only
-    reference_date = _derive_reference_date(train_df)
+    reference_date = derive_reference_date(train_df)
 
     # Feature engineering on each split
     print("\nExtracting features...")
@@ -282,7 +112,7 @@ def run_pipeline(
     X_test = test_df[feature_names]
     y_test = test_df['label']
 
-    print(f"\nUsing original splits:")
+    print("\nUsing original splits:")
     print(f"Training set:   {len(X_train)} samples")
     print(f"Validation set: {len(X_val)} samples")
     print(f"Test set:       {len(X_test)} samples")
