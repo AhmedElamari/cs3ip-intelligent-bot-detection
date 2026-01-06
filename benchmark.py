@@ -90,11 +90,9 @@ def prepare_data(data, config: Config) -> tuple:
         print("\nExtracting features...")
         extractor = BotFeatureExtractor(reference_date=reference_date)
         train_df = extractor.extract_all_features(train_df)
-        feature_names = extractor.get_feature_names()
+        print(f"Extracted {len(extractor.get_feature_names())} features")
         val_df = extractor.extract_all_features(val_df)
         test_df = extractor.extract_all_features(test_df)
-        
-        print(f"Extracted {len(feature_names)} features")
         
         # Preprocessing on each split
         print("\nPreprocessing...")
