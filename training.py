@@ -13,6 +13,17 @@ from sklearn.metrics import (
 )
 
 
+def _validate_binary_labels(*label_arrays: np.ndarray) -> None:
+    labels = np.concatenate([np.asarray(arr) for arr in label_arrays if arr is not None])
+    if labels.size == 0:
+        return
+    unique = set(np.unique(labels))
+    if not unique.issubset({0, 1}):
+        raise ValueError(
+            f"train_and_evaluate expects binary labels {{0, 1}}; found {sorted(unique)}"
+        )
+
+
 def train_and_evaluate(
     X_train: np.ndarray,
     X_val: np.ndarray,
@@ -39,6 +50,7 @@ def train_and_evaluate(
     Returns:
         Dictionary with the fitted model plus validation and test metrics.
     """
+    _validate_binary_labels(y_train, y_val, y_test)
     if model_type == 'random_forest':
         model = RandomForestClassifier(
             n_estimators=100,
@@ -94,23 +106,18 @@ def train_and_evaluate(
     print(f"  F1 Score:  {test_metrics['f1']:.4f}")
 
     print("\nClassification Report (Test):")
-    test_labels = np.unique(np.concatenate([y_test, y_test_pred]))
-    target_names = [
-        "Human" if lbl == 0 else "Bot" if lbl == 1 else str(lbl)
-        for lbl in test_labels
-    ]
     print(
         classification_report(
             y_test,
             y_test_pred,
-            labels=test_labels,
-            target_names=target_names,
+            labels=[0, 1],
+            target_names=["Human", "Bot"],
             zero_division=0
         )
     )
 
     print("\nConfusion Matrix (Test):")
-    print(confusion_matrix(y_test, y_test_pred))
+    print(confusion_matrix(y_test, y_test_pred, labels=[0, 1]))
 
     return {
         'model': model,
