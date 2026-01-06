@@ -1,13 +1,44 @@
 import importlib.util
+import re
 import sys
 import unittest
+from importlib import metadata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
-NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
+MIN_SKLEARN_VERSION = "1.5.0"
+MIN_NUMPY_VERSION = "2.3.5"
+
+
+def _version_at_least(version_str, minimum):
+    try:
+        from packaging.version import Version
+    except Exception:
+        if not re.fullmatch(r"\d+(\.\d+)*", version_str):
+            return False
+        current = tuple(int(part) for part in version_str.split("."))
+        required = tuple(int(part) for part in minimum.split("."))
+        max_len = max(len(current), len(required))
+        current += (0,) * (max_len - len(current))
+        required += (0,) * (max_len - len(required))
+        return current >= required
+    return Version(version_str) >= Version(minimum)
+
+
+def _has_min_version(module_name, dist_name, minimum):
+    if importlib.util.find_spec(module_name) is None:
+        return False
+    try:
+        version_str = metadata.version(dist_name)
+    except metadata.PackageNotFoundError:
+        return False
+    return _version_at_least(version_str, minimum)
+
+
+SKLEARN_AVAILABLE = _has_min_version("sklearn", "scikit-learn", MIN_SKLEARN_VERSION)
+NUMPY_AVAILABLE = _has_min_version("numpy", "numpy", MIN_NUMPY_VERSION)
 
 
 class GradientBoostingWeightsTest(unittest.TestCase):
