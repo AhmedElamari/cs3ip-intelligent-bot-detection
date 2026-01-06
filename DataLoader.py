@@ -60,6 +60,8 @@ class TwiBotDataLoader:
             label_path: Optional path to a separate labels file (CSV with ID/id/user_id and label columns)
             json_paths: Optional list of JSON file paths to load and combine (for train/dev/test splits)
         """
+        if json_paths and json_path:
+            raise ValueError("Provide either json_path or json_paths, not both.")
         if json_paths:
             self.json_paths = [Path(p) for p in json_paths]
             self.json_path = None
@@ -216,6 +218,7 @@ class TwiBotDataLoader:
                 return 1
             if normalized == "false":
                 return 0
+            # TwiBot JSON can encode booleans as numeric strings ("0"/"1").
             numeric = pd.to_numeric(normalized, errors="coerce")
             if numeric in (0, 1):
                 return int(numeric)
@@ -353,7 +356,7 @@ def load_twibot_splits_as_dict(
     
     split_files = {
         'train': data_dir / 'train.json',
-        'val': data_dir / 'dev.json',  # Note: dev.json maps to 'val' key
+        'val': data_dir / 'dev.json',  # TwiBot-20 uses dev.json; we standardize to 'val'
         'test': data_dir / 'test.json'
     }
     
