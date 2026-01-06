@@ -73,7 +73,7 @@ def train_and_evaluate(
         'f1': f1_score(y_val, y_val_pred, average='binary', zero_division=0)
     }
 
-    print(f"\nValidation Results:")
+    print("\nValidation Results:")
     print(f"  Accuracy:  {val_metrics['accuracy']:.4f}")
     print(f"  Precision: {val_metrics['precision']:.4f}")
     print(f"  Recall:    {val_metrics['recall']:.4f}")
@@ -87,13 +87,13 @@ def train_and_evaluate(
         'f1': f1_score(y_test, y_test_pred, average='binary', zero_division=0)
     }
 
-    print(f"\nTest Results:")
+    print("\nTest Results:")
     print(f"  Accuracy:  {test_metrics['accuracy']:.4f}")
     print(f"  Precision: {test_metrics['precision']:.4f}")
     print(f"  Recall:    {test_metrics['recall']:.4f}")
     print(f"  F1 Score:  {test_metrics['f1']:.4f}")
 
-    print(f"\nClassification Report (Test):")
+    print("\nClassification Report (Test):")
     test_labels = np.unique(np.concatenate([y_test, y_test_pred]))
     target_names = [
         "Human" if lbl == 0 else "Bot" if lbl == 1 else str(lbl)
@@ -109,7 +109,7 @@ def train_and_evaluate(
         )
     )
 
-    print(f"\nConfusion Matrix (Test):")
+    print("\nConfusion Matrix (Test):")
     print(confusion_matrix(y_test, y_test_pred))
 
     return {

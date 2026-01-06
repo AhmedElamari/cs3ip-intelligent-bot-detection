@@ -90,15 +90,11 @@ def prepare_data(data, config: Config) -> tuple:
         print("\nExtracting features...")
         extractor = BotFeatureExtractor(reference_date=reference_date)
         train_df = extractor.extract_all_features(train_df)
+        feature_names = extractor.get_feature_names()
+        val_df = extractor.extract_all_features(val_df)
+        test_df = extractor.extract_all_features(test_df)
         
-        # Use same extractor (same reference date) for val/test
-        extractor_val = BotFeatureExtractor(reference_date=reference_date)
-        val_df = extractor_val.extract_all_features(val_df)
-        
-        extractor_test = BotFeatureExtractor(reference_date=reference_date)
-        test_df = extractor_test.extract_all_features(test_df)
-        
-        print(f"Extracted {len(extractor.get_feature_names())} features")
+        print(f"Extracted {len(feature_names)} features")
         
         # Preprocessing on each split
         print("\nPreprocessing...")
@@ -137,7 +133,7 @@ def prepare_data(data, config: Config) -> tuple:
         X_test = test_df[feature_names]
         y_test = test_df['label']
         
-        print(f"\nFinal data shapes (using provided splits):")
+        print("\nFinal data shapes (using provided splits):")
         
     else:
         # Single DataFrame - split it ourselves
