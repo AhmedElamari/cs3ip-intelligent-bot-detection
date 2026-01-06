@@ -49,8 +49,7 @@ pip install shap lime matplotlib seaborn
 ## Quickstart
 Example files assumed:
 - `data/train.json`, `data/dev.json`, `data/test.json` (embedded labels)
-- Download the TwiBot-20 dataset from the official repository:
-  https://github.com/BunsenFeng/TwiBot-20.git
+- Download the TwiBot-20 dataset from the [official repository](https://github.com/BunsenFeng/TwiBot-20)
 
 Run a single model:
 ```bash
@@ -105,8 +104,8 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
 ## Data Download
-1) Download the TwiBot-20 dataset from:
-   https://github.com/BunsenFeng/TwiBot-20.git
+1) Download the TwiBot-20 dataset from the
+   [TwiBot-20 repository](https://github.com/BunsenFeng/TwiBot-20).
 2) Extract the archive.
 3) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
 

@@ -10,17 +10,15 @@ Usage:
 """
 
 import argparse
-import logging
 from pathlib import Path
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 # Project imports
-from DataLoader import load_twibot_splits_as_dict, check_twibot_data_available
-from FeatureEngineering import BotFeatureExtractor
+from DataLoader import load_twibot_splits_as_dict
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
 from config import Config, load_config
 from models import (
@@ -29,92 +27,19 @@ from models import (
 )
 from benchmarking import ModelBenchmark
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
+from pipeline_utils import safe_stratified_split
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
-LOGGER = logging.getLogger(__name__)
-
-
-def resolve_data_source() -> dict:
-    """
-    Determine best available data source.
-    
-    Returns:
-        dict with 'type' ('splits'), 'path', and 'count'
-    """
-    availability = check_twibot_data_available()
-    
-    # Require split files with labels
-    if availability['total_split_samples'] > 0:
-        splits_info = availability['splits_available']
-        has_labels = all(s['has_labels'] for s in splits_info.values() if s['exists'])
-        if has_labels:
-            return {
-                'type': 'splits',
-                'path': TWIBOT20_DATA_DIR,
-                'count': availability['total_split_samples']
-            }
-    
-    raise FileNotFoundError(
-        "No TwiBot-20 dataset found. Expected split files in:\n"
-        f"  {TWIBOT20_DATA_DIR} (train.json, dev.json, test.json)"
-    )
 
 
 def load_data() -> dict:
     """Load TwiBot-20 JSON split data from the local data/ directory."""
-    source = resolve_data_source()
-    print(f"Detected pre-split dataset under {source['path']} (train/dev/test).")
-    splits = load_twibot_splits_as_dict(source['path'])
+    print(f"Detected pre-split dataset under {TWIBOT20_DATA_DIR} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(TWIBOT20_DATA_DIR)
     for name, df in splits.items():
         print(f"{name} split: {len(df)} samples")
     return splits
-
-
-def _derive_reference_date(train_df: pd.DataFrame) -> pd.Timestamp:
-    """Derive a leakage-safe reference date from the training split."""
-    if 'account_creation_date' not in train_df.columns:
-        return None
-    account_creation = pd.to_datetime(
-        train_df['account_creation_date'],
-        errors='coerce'
-    )
-    if account_creation.notna().any():
-        ref_date = account_creation.max()
-        # Ensure timezone-aware for consistency
-        if ref_date is not None and getattr(ref_date, "tz", None) is None:
-            ref_date = ref_date.tz_localize("UTC")
-        return ref_date
-    return None
-
-
-def _safe_stratified_split(
-    indices: np.ndarray,
-    labels: np.ndarray,
-    test_size: float,
-    random_state: int,
-    split_name: str
-):
-    try:
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=labels
-        )
-    except ValueError as exc:
-        LOGGER.warning(
-            "Stratified %s split failed (%s). Falling back to unstratified split.",
-            split_name,
-            exc
-        )
-        return train_test_split(
-            indices,
-            labels,
-            test_size=test_size,
-            random_state=random_state
-        )
 
 
 def prepare_data(data, config: Config) -> tuple:
@@ -149,7 +74,7 @@ def prepare_data(data, config: Config) -> tuple:
             df.dropna(subset=['label'], inplace=True)
         
         # Derive reference date from training data only (avoid leakage)
-        reference_date = _derive_reference_date(train_df)
+        reference_date = derive_reference_date(train_df)
         
         # Feature engineering on each split
         print("\nExtracting features...")
@@ -216,7 +141,7 @@ def prepare_data(data, config: Config) -> tuple:
         # Split indices first to avoid leakage when deriving reference dates
         indices = df.index.to_numpy()
         labels = df['label'].to_numpy()
-        idx_temp, idx_test, labels_temp, _ = _safe_stratified_split(
+        idx_temp, idx_test, labels_temp, _ = safe_stratified_split(
             indices,
             labels,
             test_size=test_size,
@@ -224,7 +149,7 @@ def prepare_data(data, config: Config) -> tuple:
             split_name="test"
         )
         val_ratio = val_size / (1 - test_size)
-        idx_train, idx_val, _, _ = _safe_stratified_split(
+        idx_train, idx_val, _, _ = safe_stratified_split(
             idx_temp,
             labels_temp,
             test_size=val_ratio,
@@ -234,20 +159,7 @@ def prepare_data(data, config: Config) -> tuple:
         
         # Feature engineering
         print("\nExtracting features...")
-        reference_date = None
-        if 'account_creation_date' in df.columns:
-            account_creation = pd.to_datetime(
-                df.loc[idx_train, 'account_creation_date'], errors='coerce'
-            )
-            if account_creation.notna().any():
-                reference_date = account_creation.max()
-            else:
-                full_account_creation = pd.to_datetime(
-                    df['account_creation_date'], errors='coerce'
-                )
-                reference_date = pd.Timestamp.utcnow()
-                if full_account_creation.dt.tz is not None:
-                    reference_date = reference_date.tz_localize(full_account_creation.dt.tz)
+        reference_date = derive_reference_date(df.loc[idx_train])
         extractor = BotFeatureExtractor(reference_date=reference_date)
         df = extractor.extract_all_features(df)
         print(f"Extracted {len(extractor.get_feature_names())} features")
@@ -271,7 +183,7 @@ def prepare_data(data, config: Config) -> tuple:
         X_train, X_val, X_test = X.loc[idx_train], X.loc[idx_val], X.loc[idx_test]
         y_train, y_val, y_test = y.loc[idx_train], y.loc[idx_val], y.loc[idx_test]
         
-        print(f"\nFinal data shapes:")
+        print("\nFinal data shapes:")
     
     # Common post-processing for both paths
     
@@ -545,9 +457,7 @@ def main():
     output_dir = output_dir / f'benchmark_{timestamp}'
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Determine data source for logging
-    source = resolve_data_source()
-    data_source_str = str(source['path'])
+    data_source_str = str(TWIBOT20_DATA_DIR)
     
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
