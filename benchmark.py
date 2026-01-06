@@ -68,10 +68,20 @@ def prepare_data(data, config: Config) -> tuple:
         test_df = splits['test'].copy()
         
         # Check for labels in each split
+        cleaned = {}
         for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
             if 'label' not in df.columns:
                 raise ValueError(f"No 'label' column found in {name} split")
-            df.dropna(subset=['label'], inplace=True)
+            df = df.dropna(subset=['label'])
+            if df.empty:
+                raise ValueError(
+                    f"{name} split has no labeled rows after dropping missing labels."
+                )
+            cleaned[name] = df
+
+        train_df = cleaned['train']
+        val_df = cleaned['val']
+        test_df = cleaned['test']
         
         # Derive reference date from training data only (avoid leakage)
         reference_date = derive_reference_date(train_df)
@@ -111,6 +121,15 @@ def prepare_data(data, config: Config) -> tuple:
             .tolist()
         )
         
+        for df_name, df in (('val', val_df), ('test', test_df)):
+            missing = [col for col in feature_names if col not in df.columns]
+            if missing:
+                df[missing] = 0
+            if df_name == 'val':
+                val_df = df
+            else:
+                test_df = df
+
         X_train = train_df[feature_names]
         y_train = train_df['label']
         X_val = val_df[feature_names]

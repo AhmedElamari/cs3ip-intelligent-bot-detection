@@ -1,4 +1,5 @@
 import json
+import numbers
 import pandas as pd
 from pathlib import Path
 from typing import Optional, List, Union
@@ -176,11 +177,13 @@ class TwiBotDataLoader:
                 return int(numeric)
             return None
 
-        try:
-            numeric = int(value)
-        except (TypeError, ValueError):
+        if isinstance(value, numbers.Integral):
+            return int(value) if value in (0, 1) else None
+        if isinstance(value, numbers.Real):
+            if value in (0, 1) and float(value).is_integer():
+                return int(value)
             return None
-        return numeric if numeric in (0, 1) else None
+        return None
 
     def _parse_twitter_date(self, date_str: str) -> pd.Timestamp:
         """Parse Twitter's date format to pandas Timestamp."""
@@ -213,7 +216,10 @@ class TwiBotDataLoader:
                 return 1
             if normalized == "false":
                 return 0
-            # Preserve Python truthiness for arbitrary strings ("0" -> True)
+            numeric = pd.to_numeric(normalized, errors="coerce")
+            if numeric in (0, 1):
+                return int(numeric)
+            # Preserve Python truthiness for arbitrary strings ("0" handled above)
             return 1 if normalized else 0
 
         return int(bool(value))
@@ -275,12 +281,9 @@ class TwiBotDataLoader:
             if col in df.columns:
                 df[col] = df[col].apply(self._to_int_bool)
 
-        # Check if labels were embedded and extracted during flattening
-        has_embedded_labels = 'label' in df.columns and df['label'].notna().any()
-
-        # Merge external labels if embedded labels are not available
-        if not has_embedded_labels:
-            if self.labels is None and self.label_path:
+        # Merge external labels if requested and embedded labels are missing
+        if self.label_path and ('label' not in df.columns or df['label'].isna().any()):
+            if self.labels is None:
                 self.load_labels()
             if self.labels is not None:
                 df = self._merge_labels(df)
@@ -290,12 +293,16 @@ class TwiBotDataLoader:
     def _merge_labels(self, df: pd.DataFrame) -> pd.DataFrame:
         """Merge labels into the flattened DataFrame."""
         id_col = self._get_label_id_column(self.labels)
-        labels = self.labels[[id_col, 'label']].copy()
-        df = df.merge(
-            labels.rename(columns={id_col: 'user_id'}),
-            on='user_id',
-            how='left'
+        labels = (
+            self.labels[[id_col, 'label']]
+            .rename(columns={id_col: 'user_id'})
+            .drop_duplicates(subset=['user_id'], keep='last')
         )
+        label_map = labels.set_index('user_id')['label']
+        if 'label' in df.columns:
+            df['label'] = df['label'].fillna(df['user_id'].map(label_map))
+        else:
+            df['label'] = df['user_id'].map(label_map)
         if df['label'].notna().sum() == 0:
             raise ValueError(
                 "Label merge produced zero matches. Check the ID column and format."

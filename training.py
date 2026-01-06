@@ -3,6 +3,7 @@ Training helpers for the single-model pipeline.
 """
 
 import numpy as np
+from typing import Any, Dict, Optional
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
@@ -13,12 +14,31 @@ from sklearn.metrics import (
 
 
 def train_and_evaluate(
-    X_train, X_val, X_test,
-    y_train, y_val, y_test,
+    X_train: np.ndarray,
+    X_val: np.ndarray,
+    X_test: np.ndarray,
+    y_train: np.ndarray,
+    y_val: np.ndarray,
+    y_test: np.ndarray,
     model_type: str = 'random_forest',
-    class_weights: dict = None
-) -> dict:
-    """Train model and evaluate on validation and test sets."""
+    class_weights: Optional[Dict[int, float]] = None
+) -> Dict[str, Any]:
+    """
+    Train a model and evaluate on validation and test sets.
+
+    Args:
+        X_train: Training feature matrix.
+        X_val: Validation feature matrix.
+        X_test: Test feature matrix.
+        y_train: Training labels.
+        y_val: Validation labels.
+        y_test: Test labels.
+        model_type: Model identifier ('random_forest', 'logistic_regression', 'svm').
+        class_weights: Optional class weight mapping for imbalance handling.
+
+    Returns:
+        Dictionary with the fitted model plus validation and test metrics.
+    """
     if model_type == 'random_forest':
         model = RandomForestClassifier(
             n_estimators=100,
