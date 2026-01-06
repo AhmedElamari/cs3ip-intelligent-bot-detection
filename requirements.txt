@@ -3,10 +3,10 @@
 
 # Core data manipulation
 pandas>=1.5.0
-numpy>=1.23.0
+numpy>=1.23.5,<2.0
 
 # Machine learning
-scikit-learn>=1.2.0
+scikit-learn>=1.5.0
 imbalanced-learn>=0.10.0
 
 # Visualization

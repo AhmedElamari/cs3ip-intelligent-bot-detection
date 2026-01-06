@@ -36,7 +36,7 @@ pip install -r requirements.txt
 
 Minimum:
 ```bash
-pip install pandas numpy scikit-learn
+pip install pandas numpy>=1.23.5,<2.0 scikit-learn>=1.5.0
 ```
 
 Optional XAI tooling:
@@ -48,12 +48,12 @@ pip install shap lime matplotlib seaborn
 
 ## Quickstart
 Example files assumed:
-- `TwiBot-20_sample.json` (fixed dataset path in the repo root)
-- `labels.csv` (columns: `ID`, `id`, or `user_id` plus `label`)
+- `data/train.json`, `data/dev.json`, `data/test.json` (embedded labels)
+- Download the TwiBot-20 dataset from the [official repository](https://github.com/BunsenFeng/TwiBot-20).
 
 Run a single model:
 ```bash
-python main.py --labels labels.csv --model random_forest
+python main.py --model random_forest
 ```
 Expected output (console):
 - Training/validation/test sizes
@@ -62,7 +62,7 @@ Expected output (console):
 
 Run a benchmark with explainability:
 ```bash
-python benchmark.py --labels labels.csv --explain --save-plots
+python benchmark.py --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -72,7 +72,7 @@ Expected output (filesystem):
 
 ### Single Model Pipeline
 ```bash
-python main.py --labels labels.csv --model random_forest
+python main.py --model random_forest
 ```
 
 Options:
@@ -83,7 +83,7 @@ Options:
 
 ### Benchmarking and Explainability
 ```bash
-python benchmark.py --labels labels.csv --explain --save-plots
+python benchmark.py --explain --save-plots
 ```
 
 Options:
@@ -97,11 +97,19 @@ Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.
 
 ## Data Notes
-- The pipeline is currently locked to the bundled `TwiBot-20_sample.json`.
-- If `--labels` is omitted, the pipeline synthesizes labels for demo purposes.
-- If `--labels` is provided but the file is missing or IDs do not match, the run fails with a clear error.
+- The pipeline expects TwiBot-20 JSON with labels embedded in the data.
+- Split files under `data/` (train/dev/test) are required for runs.
+- Large datasets are intentionally not tracked in git; keep them local under `data/`.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
+
+## Data Download
+1) Download the TwiBot-20 dataset from the
+   [TwiBot-20 repository](https://github.com/BunsenFeng/TwiBot-20).
+2) Extract the archive.
+3) Copy `train.json`, `dev.json`, and `test.json` into the local `data/` folder.
+
+The `data/` folder is gitignored, so these files stay local and will not be committed.
 
 ## Testing
 ```bash

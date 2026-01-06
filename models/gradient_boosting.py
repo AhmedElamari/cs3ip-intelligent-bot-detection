@@ -30,6 +30,11 @@ class GradientBoostingModel(BaseModel):
         - Slower training due to sequential nature
         - Sensitive to hyperparameters
         - Can overfit with too many trees
+
+    Notes:
+        GradientBoostingClassifier does not support class_weight directly.
+        When class_weight is provided, the model converts it to sample weights
+        during fit to address class imbalance.
     """
     
     def __init__(self, random_state: int = 2112, **kwargs):
@@ -43,11 +48,49 @@ class GradientBoostingModel(BaseModel):
             'min_samples_leaf': kwargs.get('min_samples_leaf', 1),
             'subsample': kwargs.get('subsample', 0.8),
             'max_features': kwargs.get('max_features', 'sqrt'),
+            'class_weight': kwargs.get('class_weight', 'balanced'),
         }
         self.model = self._create_model(**self._params)
     
     def _create_model(self, **kwargs) -> GradientBoostingClassifier:
+        kwargs.pop('class_weight', None)
         return GradientBoostingClassifier(**kwargs)
+
+    @staticmethod
+    def _compute_sample_weight(y: np.ndarray, class_weight) -> Optional[np.ndarray]:
+        if class_weight is None:
+            return None
+        y_int = np.asarray(y).astype(int)
+        if class_weight == 'balanced':
+            classes, counts = np.unique(y_int, return_counts=True)
+            if len(classes) == 0:
+                return None
+            total = len(y_int)
+            weight_map = {
+                cls: total / (len(classes) * count) for cls, count in zip(classes, counts)
+            }
+        elif isinstance(class_weight, dict):
+            weight_map = {int(k): v for k, v in class_weight.items()}
+        else:
+            raise ValueError(f"Unsupported class_weight value: {class_weight}")
+        unknown = sorted(set(np.unique(y_int)) - set(weight_map.keys()))
+        if unknown:
+            raise ValueError(f"Unexpected class labels: {unknown}")
+        return np.array([weight_map[int(label)] for label in y_int], dtype=float)
+
+    def fit(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        feature_names: Optional[List[str]] = None,
+        **kwargs
+    ) -> 'GradientBoostingModel':
+        sample_weight = self._compute_sample_weight(y_train, self._params.get('class_weight'))
+        if sample_weight is not None:
+            kwargs = dict(kwargs)
+            kwargs['sample_weight'] = sample_weight
+        super().fit(X_train, y_train, feature_names=feature_names, **kwargs)
+        return self
     
     @property
     def is_interpretable(self) -> bool:

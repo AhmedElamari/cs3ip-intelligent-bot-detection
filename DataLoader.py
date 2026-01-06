@@ -1,12 +1,26 @@
 import json
+import numbers
 import pandas as pd
-import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Union
+
+
+__all__ = [
+    "TwiBotDataLoader",
+    "load_twibot_json",
+    "load_twibot_splits_as_dict",
+]
 
 
 class TwiBotDataLoader:
-    """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame."""
+    """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame.
+    
+    Supports both:
+    - Single JSON file with optional separate labels CSV
+    - Multiple JSON files (train/dev/test splits) with embedded labels
+    """
+
+    TWITTER_DATE_FORMAT = "%a %b %d %H:%M:%S %z %Y"
 
     # Mapping from TwiBot-20 JSON fields to expected column names
     FIELD_MAPPING = {
@@ -23,24 +37,57 @@ class TwiBotDataLoader:
         'has_extended_profile'
     ]
     LABEL_ID_CANDIDATES = ('ID', 'id', 'user_id')
+    BOOL_COLUMNS = (
+        "is_verified",
+        "protected",
+        "geo_enabled",
+        "default_profile",
+        "default_profile_image",
+        "has_extended_profile",
+    )
 
-    def __init__(self, json_path: str, label_path: Optional[str] = None):
+    def __init__(
+        self,
+        json_path: Optional[Union[str, Path]] = None,
+        label_path: Optional[str] = None,
+        json_paths: Optional[List[Union[str, Path]]] = None
+    ):
         """
         Initialize the data loader.
 
         Args:
-            json_path: Path to the TwiBot-20 JSON file
+            json_path: Path to a single TwiBot-20 JSON file
             label_path: Optional path to a separate labels file (CSV with ID/id/user_id and label columns)
+            json_paths: Optional list of JSON file paths to load and combine (for train/dev/test splits)
         """
-        self.json_path = Path(json_path)
+        if json_paths and json_path:
+            raise ValueError("Provide either json_path or json_paths, not both.")
+        if json_paths:
+            self.json_paths = [Path(p) for p in json_paths]
+            self.json_path = None
+        elif json_path:
+            self.json_path = Path(json_path)
+            self.json_paths = None
+        else:
+            raise ValueError("Either json_path or json_paths must be provided")
+        
         self.label_path = Path(label_path) if label_path else None
         self.raw_data = None
         self.labels = None
 
     def load_json(self) -> list:
-        """Load raw JSON data from file."""
-        with open(self.json_path, 'r', encoding='utf-8') as f:
-            self.raw_data = json.load(f)
+        """Load raw JSON data from file(s)."""
+        if self.json_paths:
+            # Load and combine multiple files
+            self.raw_data = []
+            for path in self.json_paths:
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.raw_data.extend(data)
+        else:
+            # Single file
+            with open(self.json_path, 'r', encoding='utf-8') as f:
+                self.raw_data = json.load(f)
         return self.raw_data
 
     def load_labels(self) -> Optional[pd.DataFrame]:
@@ -114,19 +161,71 @@ class TwiBotDataLoader:
                 "Labels must be binary (0/1) after normalization."
             )
 
-    def _parse_twitter_date(self, date_str: str) -> Optional[pd.Timestamp]:
+    def _normalize_embedded_label(self, value) -> Optional[int]:
+        """Normalize a single embedded label value (string/number) to 0/1."""
+        if value is None or pd.isna(value):
+            return None
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in ("0", "1"):
+                return int(normalized)
+            if normalized in ("bot", "fake"):
+                return 1
+            if normalized in ("human", "real"):
+                return 0
+            numeric = pd.to_numeric(normalized, errors="coerce")
+            if numeric in (0, 1):
+                return int(numeric)
+            return None
+
+        if isinstance(value, numbers.Integral):
+            return int(value) if value in (0, 1) else None
+        if isinstance(value, numbers.Real):
+            if value in (0, 1) and float(value).is_integer():
+                return int(value)
+            return None
+        return None
+
+    def _parse_twitter_date(self, date_str: str) -> pd.Timestamp:
         """Parse Twitter's date format to pandas Timestamp."""
         if not date_str or pd.isna(date_str):
-            return None
-        try:
-            # Twitter format: "Wed Oct 10 20:19:24 +0000 2018"
-            return pd.to_datetime(date_str, format='%a %b %d %H:%M:%S %z %Y')
-        except (ValueError, TypeError):
-            try:
-                # Fallback to flexible parsing
-                return pd.to_datetime(date_str)
-            except:
-                return None
+            return pd.NaT
+
+        # Fast path: strict Twitter format
+        parsed = pd.to_datetime(
+            date_str,
+            format=self.TWITTER_DATE_FORMAT,
+            errors="coerce",
+        )
+        if not pd.isna(parsed):
+            return parsed
+
+        # Fallback: flexible parsing
+        return pd.to_datetime(date_str, errors="coerce")
+
+    @staticmethod
+    def _to_int_bool(value) -> int:
+        """Convert a bool-ish value to 0/1, matching TwiBot-20's mixed typing."""
+        if value is True or value == 1:
+            return 1
+        if value is False or value == 0 or pd.isna(value):
+            return 0
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "true":
+                return 1
+            if normalized == "false":
+                return 0
+            # TwiBot JSON can encode booleans as numeric strings ("0"/"1").
+            numeric = pd.to_numeric(normalized, errors="coerce")
+            if numeric in (0, 1):
+                return int(numeric)
+            # Preserve Python truthiness for arbitrary strings ("0" handled above)
+            return 1 if normalized else 0
+
+        return int(bool(value))
 
     def _flatten_user(self, user: dict) -> dict:
         """Flatten a single user record from nested JSON to flat dict."""
@@ -134,6 +233,11 @@ class TwiBotDataLoader:
 
         # Extract top-level ID
         flat['user_id'] = self._clean_string(user.get('ID', ''))
+
+        # Embedded label (some TwiBot-20 variants include it directly)
+        label = self._normalize_embedded_label(user.get("label"))
+        if label is not None:
+            flat["label"] = label
 
         # Extract profile fields
         profile = user.get('profile', {}) or {}
@@ -145,16 +249,19 @@ class TwiBotDataLoader:
 
         # Extract domain (first domain if list)
         domain = user.get('domain', [])
-        flat['domain'] = domain[0] if domain else None
+        if isinstance(domain, list):
+            flat['domain'] = domain[0] if domain else None
+        else:
+            flat['domain'] = domain
 
         # Extract tweet count from tweet list
-        tweets = user.get('tweet', [])
+        tweets = user.get('tweet') or []
         flat['tweet_count'] = len(tweets) if tweets else 0
 
         # Extract neighbor counts
-        neighbor = user.get('neighbor', {}) or {}
-        flat['following_sample_count'] = len(neighbor.get('following', []))
-        flat['follower_sample_count'] = len(neighbor.get('follower', []))
+        neighbor = user.get('neighbor') or {}
+        flat['following_sample_count'] = len(neighbor.get('following', []) or [])
+        flat['follower_sample_count'] = len(neighbor.get('follower', []) or [])
 
         return flat
 
@@ -172,23 +279,15 @@ class TwiBotDataLoader:
         if 'account_creation_date' in df.columns:
             df['account_creation_date'] = df['account_creation_date'].apply(self._parse_twitter_date)
 
-        # Convert boolean fields to int (handle string 'True'/'False' and actual booleans)
-        bool_columns = ['is_verified', 'protected', 'geo_enabled', 
-                        'default_profile', 'default_profile_image', 'has_extended_profile']
-        for col in bool_columns:
+        # Convert boolean-ish fields to int (handle strings + mixed typing)
+        for col in self.BOOL_COLUMNS:
             if col in df.columns:
-                # Handle string booleans like 'True', 'False' and actual booleans
-                df[col] = df[col].apply(lambda x: 
-                    1 if x is True or x == 'True' or x == 'true' or x == 1 
-                    else 0 if x is False or x == 'False' or x == 'false' or x == 0 or pd.isna(x) 
-                    else int(bool(x))
-                )
+                df[col] = df[col].apply(self._to_int_bool)
 
-        # Merge labels if available
-        if self.labels is not None:
-            df = self._merge_labels(df)
-        elif self.label_path:
-            self.load_labels()
+        # Merge external labels if requested and embedded labels are missing
+        if self.label_path and ('label' not in df.columns or df['label'].isna().any()):
+            if self.labels is None:
+                self.load_labels()
             if self.labels is not None:
                 df = self._merge_labels(df)
 
@@ -197,12 +296,16 @@ class TwiBotDataLoader:
     def _merge_labels(self, df: pd.DataFrame) -> pd.DataFrame:
         """Merge labels into the flattened DataFrame."""
         id_col = self._get_label_id_column(self.labels)
-        labels = self.labels[[id_col, 'label']].copy()
-        df = df.merge(
-            labels.rename(columns={id_col: 'user_id'}),
-            on='user_id',
-            how='left'
+        labels = (
+            self.labels[[id_col, 'label']]
+            .rename(columns={id_col: 'user_id'})
+            .drop_duplicates(subset=['user_id'], keep='last')
         )
+        label_map = labels.set_index('user_id')['label']
+        if 'label' in df.columns:
+            df['label'] = df['label'].fillna(df['user_id'].map(label_map))
+        else:
+            df['label'] = df['user_id'].map(label_map)
         if df['label'].notna().sum() == 0:
             raise ValueError(
                 "Label merge produced zero matches. Check the ID column and format."
@@ -228,21 +331,48 @@ def load_twibot_json(json_path: str, label_path: Optional[str] = None) -> pd.Dat
     Returns:
         Flattened pandas DataFrame ready for preprocessing
     """
-    loader = TwiBotDataLoader(json_path, label_path)
+    loader = TwiBotDataLoader(json_path=json_path, label_path=label_path)
     return loader.load()
 
 
-if __name__ == '__main__':
-    # Example usage
-    import sys
+def load_twibot_splits_as_dict(
+    data_dir: Union[str, Path] = 'data',
+    label_path: Optional[str] = None
+) -> dict:
+    """
+    Load TwiBot-20 data splits as separate DataFrames.
     
-    json_file = sys.argv[1] if len(sys.argv) > 1 else 'TwiBot-20_sample.json'
-    label_file = sys.argv[2] if len(sys.argv) > 2 else None
+    This preserves the original train/dev/test split design, which typically
+    results in better model performance than re-splitting combined data.
+
+    Args:
+        data_dir: Path to directory containing train.json, dev.json, test.json
+        label_path: Optional path to external labels CSV
+
+    Returns:
+        Dictionary with keys 'train', 'val', 'test' mapping to DataFrames
+    """
+    data_dir = Path(data_dir)
     
-    df = load_twibot_json(json_file, label_file)
-    print(f"Loaded {len(df)} records with columns:")
-    print(df.columns.tolist())
-    print(f"\nSample data:")
-    print(df.head())
-    print(f"\nData types:")
-    print(df.dtypes)
+    split_files = {
+        'train': data_dir / 'train.json',
+        'val': data_dir / 'dev.json',  # TwiBot-20 uses dev.json; we standardize to 'val'
+        'test': data_dir / 'test.json'
+    }
+    
+    # Verify all files exist
+    missing = [name for name, path in split_files.items() if not path.exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing split files: {missing}. "
+            f"Expected train.json, dev.json, test.json in {data_dir}"
+        )
+    
+    splits = {}
+    for split_name, split_path in split_files.items():
+        loader = TwiBotDataLoader(json_path=split_path, label_path=label_path)
+        splits[split_name] = loader.load()
+    
+    return splits
+
+
