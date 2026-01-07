@@ -13,7 +13,25 @@ from models import (
 
 
 def create_models(config: Config) -> dict:
-    """Create model instances based on configuration."""
+    """
+    This function creates model instances based of the configurations provided, 
+    in the config object.
+
+    Args:
+        config: (Config) configuration object used to determine which models are enabled
+        and their parameters.
+
+
+    Returns:
+        Dictionary of model instances keyed by model name to corresponding model class.
+        For example, {
+            'logistic_regression': LogisticRegressionModel,
+            'svm': SVMModel,
+            'decision_tree': DecisionTreeModel,
+            'random_forest': RandomForestModel,
+            'gradient_boosting': GradientBoostingModel,
+        }
+    """
     models = {}
 
     enabled_models = config.get_enabled_models()

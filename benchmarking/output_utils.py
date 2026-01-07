@@ -8,7 +8,15 @@ from config import Config
 
 
 def save_comparison_outputs(benchmark, output_dir: Path, config: Config) -> None:
-    """Save comparison tables and plots."""
+    """Save comparison tables and plots.
+    This function saves the comparison table and plots for the benchmark pipeline.
+
+    Args:
+        benchmark: The benchmark pipeline object holding trained models and results.
+        output_dir: Path to directory where comparison tables and plots will be saved
+        config: Configuration object holding output settings
+    """
+    
     comparison_df = benchmark.get_comparison_table()
     comparison_df.to_csv(output_dir / 'model_comparison.csv', index=False)
     print(f"\nSaved comparison table to {output_dir / 'model_comparison.csv'}")

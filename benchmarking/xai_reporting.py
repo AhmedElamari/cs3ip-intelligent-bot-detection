@@ -21,7 +21,35 @@ def run_explainability_analysis(
     config: Config,
     output_dir: Path
 ) -> dict:
-    """Run XAI analysis on trained models."""
+    """Run XAI analysis on trained models.
+    This function runs different explainability (XAI) analyses, including feature importance,
+    SHAP analysis, and LIME analysis, on trained models in the benchmark pipeline.
+
+    Args:
+        benchmark: The benchmark pipeline object holding trained models and results.
+            is expected to expose ''results'' mapping of model names to 
+            result dictornarites containing atleasta  ''"model"'' key.
+        X_train: Training feature matrix to fit models as Numpy array (N_train x N_features)
+        X_test: Test feature matrix on which explainations are to 
+            be computed. This is expected to be a Numpy array (N_test x N_features)
+        y_test: Test label vector as Numpy array (N_test,)
+        feature_names: List of feature names as strings in column 
+            order of X_train and X_test.
+        config: Configuration object holding explainability settings
+        output_dir: Path to directory where XAI results will be saved
+
+    Returns:
+        Dictionary containing XAI results for each model. 
+        Keys for example, includes 'feature_importance' and 'shap_summary_<model_name>'.
+        For a feature importance key, the value is a pandas DataFrame containing for 
+        each model, the feature names and their importance scores.
+
+        For a SHAP summary key, the value is a matplotlib figure object containing
+        a SHAP summary plot for the model.
+
+        For a LIME explanations key, the value is a dictionary containing the
+        explanations for the test instances.
+    """
     print("\n" + "=" * 60)
     print("EXPLAINABILITY ANALYSIS (XAI)")
     print("=" * 60)
@@ -196,7 +224,7 @@ def run_explainability_analysis(
                 opposite_class = "Human" if predicted_class == "Bot" else "Bot"
                 for feat, contrib in list(explanation['feature_contributions'].items())[:5]:
                     direction = predicted_class if contrib >= 0 else opposite_class
-                    print(f"    {feat}: {contrib:+.4f} ->{direction}")
+                    print(f"    {feat}: {contrib:+.4f} -> {direction}")
 
             xai_results['lime_explanations'] = True
 
