@@ -311,8 +311,8 @@ def run_explainability_analysis(
     if config.get('explainability.shap.enabled', True):
         print("\n--- SHAP Analysis ---")
         
-        # Focus on less interpretable models
-        target_models = ['random_forest', 'gradient_boosting', 'svm']
+        # Focus SHAP on tree-based models; use LIME for local explanations on others.
+        target_models = ['random_forest', 'gradient_boosting']
         
         for model_name in target_models:
             if model_name not in benchmark.results:
