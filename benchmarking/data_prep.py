@@ -5,7 +5,6 @@ Data preparation helpers for the benchmark pipeline.
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor, derive_reference_date
@@ -15,7 +14,19 @@ from pipeline_utils import safe_stratified_split
 
 
 def load_data(data_dir: Path) -> dict:
-    """Load TwiBot-20 JSON split data from the local data/ directory."""
+    """Load TwiBot-20 JSON split data from the local data/ directory.
+
+    Args:
+        data_dir: Path to the directory containing the TwiBot-20 JSON splits 
+        (e.g. data/train.json, data/dev.json, data/test.json)
+
+    Returns:
+        Dictionary of data splits keyed by split name to corresponding DataFrame.
+        For example, {
+            'train': train_df,
+            'val': val_df,
+            'test': test_df,
+    """
     print(f"Detected pre-split dataset under {data_dir} (train/dev/test).")
     splits = load_twibot_splits_as_dict(data_dir)
     for name, df in splits.items():
@@ -24,7 +35,20 @@ def load_data(data_dir: Path) -> dict:
 
 
 def prepare_data(data, config: Config) -> tuple:
-    """Prepare data: feature engineering, preprocessing, splitting."""
+    """Prepare data: for model training, including feature engineering, preprocessing, 
+    and splitting.
+
+    Args:
+        data: Either
+            - Dictionary of data splits keyed by split name to corresponding DataFrame.
+            
+        config: (Config) configuration object holding the configuration for the data preparation.
+
+    Returns:
+        Tuple containing the training, validation, and test data splits, as well as the feature names.
+        For example, (X_train, X_val, X_test, y_train, y_val, y_test, feature_names)
+
+    """
     print("\n" + "=" * 60)
     print("DATA PREPARATION")
     print("=" * 60)
