@@ -19,7 +19,8 @@ class BenchmarkSmokeTest(unittest.TestCase):
         import numpy as np
         import pandas as pd
 
-        from benchmark import prepare_data, create_models
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
         from config import Config
 
