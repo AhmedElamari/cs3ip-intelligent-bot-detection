@@ -51,7 +51,7 @@ def prepare_data(data, config: Config) -> tuple:
     print("=" * 60)
 
     if not isinstance(data, dict):
-        raise ValueError(
+        raise TypeError(
             "prepare_data expects a dict with 'train', 'val', and 'test' DataFrames."
         )
 
