@@ -237,32 +237,27 @@ class MetricsCalculator:
         """
         proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
         
-        best_threshold = 0.5
-        best_score = 0
-        
-        for threshold in np.arange(0.1, 0.9, 0.01):
+        def compute_score(threshold):
             y_pred = (proba >= threshold).astype(int)
-            
             if metric == 'f1':
-                score = f1_score(y_true, y_pred, zero_division=0)
+                return f1_score(y_true, y_pred, zero_division=0)
             elif metric == 'balanced_accuracy':
-                score = balanced_accuracy_score(y_true, y_pred)
+                return balanced_accuracy_score(y_true, y_pred)
             elif metric == 'youden':
-                # Youden's J statistic = sensitivity + specificity - 1
                 tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
                 sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
                 specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-                score = sensitivity + specificity - 1
+                return sensitivity + specificity - 1
             else:
                 raise ValueError(f"Unknown metric: {metric}")
-            
-            if score > best_score:
-                best_score = score
-                best_threshold = threshold
+        
+        thresholds = np.arange(0.1, 0.9, 0.01)
+        scores = [compute_score(t) for t in thresholds]
+        best_idx = np.argmax(scores)
         
         return {
-            'optimal_threshold': best_threshold,
-            'best_score': best_score,
+            'optimal_threshold': thresholds[best_idx],
+            'best_score': scores[best_idx],
             'metric': metric,
         }
     

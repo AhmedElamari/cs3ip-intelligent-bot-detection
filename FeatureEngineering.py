@@ -104,33 +104,26 @@ class BotFeatureExtractor:
         return df
 
     def extract_profile_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract profile-related features (bot indicators)."""
+        """Extract profile-related features (bot indicators).
+        
+        Boolean profile features like default_profile, default_profile_image, etc.
+        are normalized to integers (0/1) for model compatibility.
+        """
         df = df.copy()
         
-        # Default profile (hasn't customized - common for bots)
-        if 'default_profile' in df.columns:
-            df['default_profile'] = df['default_profile'].fillna(0).astype(int)
-            self.feature_names.append('default_profile')
+        # Boolean profile features that indicate bot-like behavior
+        bool_features = [
+            'default_profile',       # hasn't customized - common for bots
+            'default_profile_image', # hasn't uploaded photo - common for bots
+            'has_extended_profile',
+            'geo_enabled',
+            'protected',
+        ]
         
-        # Default profile image (hasn't uploaded photo - common for bots)
-        if 'default_profile_image' in df.columns:
-            df['default_profile_image'] = df['default_profile_image'].fillna(0).astype(int)
-            self.feature_names.append('default_profile_image')
-        
-        # Has extended profile
-        if 'has_extended_profile' in df.columns:
-            df['has_extended_profile'] = df['has_extended_profile'].fillna(0).astype(int)
-            self.feature_names.append('has_extended_profile')
-        
-        # Geo enabled
-        if 'geo_enabled' in df.columns:
-            df['geo_enabled'] = df['geo_enabled'].fillna(0).astype(int)
-            self.feature_names.append('geo_enabled')
-        
-        # Protected account
-        if 'protected' in df.columns:
-            df['protected'] = df['protected'].fillna(0).astype(int)
-            self.feature_names.append('protected')
+        for feature in bool_features:
+            if feature in df.columns:
+                df[feature] = df[feature].fillna(0).astype(int)
+                self.feature_names.append(feature)
         
         return df
 

@@ -31,26 +31,29 @@ class BotDetector:
         return X_train_scaled, X_val_scaled, X_test_scaled
 
     def handle_imbalance(self, X_train, y_train, method: str = 'smote'):
-        """Handle class imbalance in bot detection datasets"""
-        if method == 'smote':
-            try:
+        """Handle class imbalance in bot detection datasets.
+        
+        Args:
+            X_train: Training features
+            y_train: Training labels
+            method: Resampling method ('smote' or 'undersample')
+            
+        Returns:
+            Resampled X_train and y_train, or original data if imblearn unavailable
+        """
+        try:
+            if method == 'smote':
                 from imblearn.over_sampling import SMOTE
-                smote = SMOTE(random_state=2112)
-                X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
-                return X_resampled, y_resampled
-            except ImportError:
-                print("imblearn not installed.  Install with: pip install imbalanced-learn")
-                return X_train, y_train
-        elif method == 'undersample':
-            try:
+                sampler = SMOTE(random_state=2112)
+            elif method == 'undersample':
                 from imblearn.under_sampling import RandomUnderSampler
-                rus = RandomUnderSampler(random_state=2112)
-                X_resampled, y_resampled = rus.fit_resample(X_train, y_train)
-                return X_resampled, y_resampled
-            except ImportError:
-                print("imblearn not installed. Install with: pip install imbalanced-learn")
+                sampler = RandomUnderSampler(random_state=2112)
+            else:
                 return X_train, y_train
-        return X_train, y_train
+            return sampler.fit_resample(X_train, y_train)
+        except ImportError:
+            print("imblearn not installed. Install with: pip install imbalanced-learn")
+            return X_train, y_train
 
     def select_features(self, X_train, y_train, k: int = 20):
         """Select top k features using mutual information"""

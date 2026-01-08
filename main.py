@@ -63,10 +63,11 @@ def run_pipeline(
     # Step 1: Load data
     splits = load_and_prepare_data()
 
-    split_frames = {name: splits[name].copy() for name in ('train', 'val', 'test')}
-
-    # Check for labels
-    for name, df in split_frames.items():
+    # Validate and clean each split
+    split_names = ['train', 'val', 'test']
+    split_frames = {}
+    for name in split_names:
+        df = splits[name].copy()
         if 'label' not in df.columns:
             raise ValueError(f"No 'label' column found in {name} split")
         df = df.dropna(subset=['label'])
@@ -76,9 +77,7 @@ def run_pipeline(
             )
         split_frames[name] = df
 
-    train_df = split_frames['train']
-    val_df = split_frames['val']
-    test_df = split_frames['test']
+    train_df, val_df, test_df = (split_frames[name] for name in split_names)
 
     # Derive reference date from training data only
     reference_date = derive_reference_date(train_df)
@@ -89,18 +88,15 @@ def run_pipeline(
     val_df = engineer_features(val_df, reference_date=reference_date)
     test_df = engineer_features(test_df, reference_date=reference_date)
 
-    # Preprocessing
+    # Preprocessing each split
     print("\nPreprocessing data...")
     detector = BotDetector()
-
-    detector.data = train_df
-    train_df = detector.preprocess()
-
-    detector.data = val_df
-    val_df = detector.preprocess()
-
-    detector.data = test_df
-    test_df = detector.preprocess()
+    processed = {}
+    for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+        detector.data = df
+        processed[name] = detector.preprocess()
+    
+    train_df, val_df, test_df = processed['train'], processed['val'], processed['test']
 
     # Extract features
     feature_names = (
@@ -110,14 +106,11 @@ def run_pipeline(
         .tolist()
     )
 
-    for df_name, df in (('val', val_df), ('test', test_df)):
+    # Ensure all splits have the same features
+    for df in (val_df, test_df):
         missing = [col for col in feature_names if col not in df.columns]
         if missing:
             df[missing] = 0
-        if df_name == 'val':
-            val_df = df
-        else:
-            test_df = df
 
     X_train = train_df[feature_names]
     y_train = train_df['label']

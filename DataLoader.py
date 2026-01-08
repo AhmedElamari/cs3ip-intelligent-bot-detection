@@ -137,25 +137,30 @@ class TwiBotDataLoader:
 
     @staticmethod
     def _to_int_bool(value) -> int:
-        """Convert a bool-ish value to 0/1, matching TwiBot-20's mixed typing."""
+        """Convert a bool-ish value to 0/1, matching TwiBot-20's mixed typing.
+        
+        Handles:
+            - Python bools (True/False)
+            - Integers (0/1)
+            - Strings ("true"/"false", "0"/"1")
+            - None/NaN (treated as 0)
+            - Other values (converted via Python bool())
+        """
+        # Handle common cases first (fast path)
         if value is True or value == 1:
             return 1
         if value is False or value == 0 or pd.isna(value):
             return 0
-
+        
+        # Handle string representations
         if isinstance(value, str):
             normalized = value.strip().lower()
-            if normalized == "true":
+            if normalized in ("true", "1"):
                 return 1
-            if normalized == "false":
+            if normalized in ("false", "0", ""):
                 return 0
-            # TwiBot JSON can encode booleans as numeric strings ("0"/"1").
-            numeric = pd.to_numeric(normalized, errors="coerce")
-            if numeric in (0, 1):
-                return int(numeric)
-            # Preserve Python truthiness for arbitrary strings ("0" handled above)
-            return 1 if normalized else 0
-
+            return 1  # Non-empty strings are truthy
+        
         return int(bool(value))
 
     def _flatten_user(self, user: dict) -> dict:

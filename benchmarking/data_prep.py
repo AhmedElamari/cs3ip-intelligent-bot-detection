@@ -55,14 +55,11 @@ def prepare_data(data, config: Config) -> tuple:
             "prepare_data expects a dict with 'train', 'val', and 'test' DataFrames."
         )
 
-    splits = data
-    train_df = splits['train'].copy()
-    val_df = splits['val'].copy()
-    test_df = splits['test'].copy()
-
-    # Check for labels in each split
+    # Clean and validate each split
+    split_names = ['train', 'val', 'test']
     cleaned = {}
-    for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+    for name in split_names:
+        df = data[name].copy()
         if 'label' not in df.columns:
             raise ValueError(f"No 'label' column found in {name} split")
         df = df.dropna(subset=['label'])
@@ -72,9 +69,7 @@ def prepare_data(data, config: Config) -> tuple:
             )
         cleaned[name] = df
 
-    train_df = cleaned['train']
-    val_df = cleaned['val']
-    test_df = cleaned['test']
+    train_df, val_df, test_df = cleaned['train'], cleaned['val'], cleaned['test']
 
     # Derive reference date from training data only (avoid leakage)
     reference_date = derive_reference_date(train_df)
@@ -90,15 +85,11 @@ def prepare_data(data, config: Config) -> tuple:
     # Preprocessing on each split
     print("\nPreprocessing...")
     detector = BotDetector()
+    for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+        detector.data = df
+        cleaned[name] = detector.preprocess()
 
-    detector.data = train_df
-    train_df = detector.preprocess()
-
-    detector.data = val_df
-    val_df = detector.preprocess()
-
-    detector.data = test_df
-    test_df = detector.preprocess()
+    train_df, val_df, test_df = cleaned['train'], cleaned['val'], cleaned['test']
 
     # Extract features and labels
     feature_names = (
