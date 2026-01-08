@@ -211,9 +211,15 @@ def run_explainability_analysis(
 
             # Explain a few test instances
             n_explain = min(3, len(X_test))
+            if n_explain == 0:
+                print("No test samples available for LIME explanations.")
             for i in range(n_explain):
+                if isinstance(X_test, pd.DataFrame):
+                    instance = X_test.iloc[i].to_numpy()
+                else:
+                    instance = X_test[i]
                 explanation = lime_explainer.explain_instance(
-                    X_test[i],
+                    instance,
                     num_features=config.get('explainability.lime.num_features', 10)
                 )
 
