@@ -7,7 +7,6 @@ from typing import Optional, List, Union
 
 __all__ = [
     "TwiBotDataLoader",
-    "load_twibot_json",
     "load_twibot_splits_as_dict",
 ]
 
@@ -15,9 +14,7 @@ __all__ = [
 class TwiBotDataLoader:
     """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame.
     
-    Supports both:
-    - Single JSON file with optional separate labels CSV
-    - Multiple JSON files (train/dev/test splits) with embedded labels
+    Intended for JSON files with embedded labels, used via train/dev/test splits.
     """
 
     TWITTER_DATE_FORMAT = "%a %b %d %H:%M:%S %z %Y"
@@ -36,7 +33,6 @@ class TwiBotDataLoader:
         'statuses_count', 'default_profile', 'default_profile_image',
         'has_extended_profile'
     ]
-    LABEL_ID_CANDIDATES = ('ID', 'id', 'user_id')
     BOOL_COLUMNS = (
         "is_verified",
         "protected",
@@ -49,7 +45,6 @@ class TwiBotDataLoader:
     def __init__(
         self,
         json_path: Optional[Union[str, Path]] = None,
-        label_path: Optional[str] = None,
         json_paths: Optional[List[Union[str, Path]]] = None
     ):
         """
@@ -57,7 +52,6 @@ class TwiBotDataLoader:
 
         Args:
             json_path: Path to a single TwiBot-20 JSON file
-            label_path: Optional path to a separate labels file (CSV with ID/id/user_id and label columns)
             json_paths: Optional list of JSON file paths to load and combine (for train/dev/test splits)
         """
         if json_paths and json_path:
@@ -71,9 +65,7 @@ class TwiBotDataLoader:
         else:
             raise ValueError("Either json_path or json_paths must be provided")
         
-        self.label_path = Path(label_path) if label_path else None
         self.raw_data = None
-        self.labels = None
 
     def load_json(self) -> list:
         """Load raw JSON data from file(s)."""
@@ -90,76 +82,15 @@ class TwiBotDataLoader:
                 self.raw_data = json.load(f)
         return self.raw_data
 
-    def load_labels(self) -> Optional[pd.DataFrame]:
-        """Load labels from a separate file if provided."""
-        if not self.label_path:
-            return None
-        if not self.label_path.exists():
-            raise FileNotFoundError(
-                f"Labels file not found: {self.label_path}. "
-                "Provide a valid path with --labels."
-            )
-        self.labels = pd.read_csv(self.label_path)
-        if self.labels.empty:
-            raise ValueError(f"Labels file is empty: {self.label_path}")
-        if 'label' not in self.labels.columns:
-            raise ValueError(
-                "Labels file must include a 'label' column with 0/1 values."
-            )
-        id_col = self._get_label_id_column(self.labels)
-        self.labels = self.labels[[id_col, 'label']].copy()
-        self.labels[id_col] = self._normalize_id_series(self.labels[id_col])
-        self.labels['label'] = self._normalize_label_values(self.labels['label'])
-        self._validate_label_values(self.labels['label'])
-        return self.labels
-
     def _clean_string(self, value) -> str:
         """Clean string values by stripping whitespace."""
         if isinstance(value, str):
             return value.strip()
         return value
 
-    def _get_label_id_column(self, labels: pd.DataFrame) -> str:
-        """Find the ID column in a labels DataFrame."""
-        for candidate in self.LABEL_ID_CANDIDATES:
-            if candidate in labels.columns:
-                return candidate
-        raise ValueError(
-            "Labels file must include one of these ID columns: "
-            f"{', '.join(self.LABEL_ID_CANDIDATES)}"
-        )
-
     def _normalize_id_series(self, series: pd.Series) -> pd.Series:
-        """Normalize ID values for reliable merging."""
+        """Normalize ID values for consistent comparisons."""
         return series.astype(str).str.strip()
-
-    def _normalize_label_values(self, series: pd.Series) -> pd.Series:
-        """Normalize label values to numeric 0/1 where possible."""
-        if pd.api.types.is_numeric_dtype(series):
-            return pd.to_numeric(series, errors='coerce')
-        normalized = series.astype(str).str.strip().str.lower()
-        label_map = {
-            'bot': 1,
-            'human': 0,
-            'fake': 1,
-            'real': 0,
-        }
-        mapped = normalized.map(label_map)
-        numeric = pd.to_numeric(normalized, errors='coerce')
-        return mapped.fillna(numeric)
-
-    def _validate_label_values(self, series: pd.Series) -> None:
-        """Ensure labels are binary after normalization."""
-        valid_values = set(series.dropna().unique())
-        if not valid_values:
-            raise ValueError(
-                "Labels file has no valid label values after normalization."
-            )
-        # Accept both integer and float representations of 0 and 1 (e.g., 0, 1, 0.0, 1.0)
-        if not all((v == 0) or (v == 1) for v in valid_values):
-            raise ValueError(
-                "Labels must be binary (0/1) after normalization."
-            )
 
     def _normalize_embedded_label(self, value) -> Optional[int]:
         """Normalize a single embedded label value (string/number) to 0/1."""
@@ -284,60 +215,16 @@ class TwiBotDataLoader:
             if col in df.columns:
                 df[col] = df[col].apply(self._to_int_bool)
 
-        # Merge external labels if requested and embedded labels are missing
-        if self.label_path and ('label' not in df.columns or df['label'].isna().any()):
-            if self.labels is None:
-                self.load_labels()
-            if self.labels is not None:
-                df = self._merge_labels(df)
-
-        return df
-
-    def _merge_labels(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Merge labels into the flattened DataFrame."""
-        id_col = self._get_label_id_column(self.labels)
-        labels = (
-            self.labels[[id_col, 'label']]
-            .rename(columns={id_col: 'user_id'})
-            .drop_duplicates(subset=['user_id'], keep='last')
-        )
-        label_map = labels.set_index('user_id')['label']
-        if 'label' in df.columns:
-            df['label'] = df['label'].fillna(df['user_id'].map(label_map))
-        else:
-            df['label'] = df['user_id'].map(label_map)
-        if df['label'].notna().sum() == 0:
-            raise ValueError(
-                "Label merge produced zero matches. Check the ID column and format."
-            )
         return df
 
     def load(self) -> pd.DataFrame:
         """Main entry point: load and return flattened DataFrame."""
         self.load_json()
-        if self.label_path:
-            self.load_labels()
         return self.flatten_to_dataframe()
 
 
-def load_twibot_json(json_path: str, label_path: Optional[str] = None) -> pd.DataFrame:
-    """
-    Convenience function to load TwiBot-20 JSON data.
-
-    Args:
-        json_path: Path to TwiBot-20 JSON file
-        label_path: Optional path to labels CSV file (ID/id/user_id and label)
-
-    Returns:
-        Flattened pandas DataFrame ready for preprocessing
-    """
-    loader = TwiBotDataLoader(json_path=json_path, label_path=label_path)
-    return loader.load()
-
-
 def load_twibot_splits_as_dict(
-    data_dir: Union[str, Path] = 'data',
-    label_path: Optional[str] = None
+    data_dir: Union[str, Path] = 'data'
 ) -> dict:
     """
     Load TwiBot-20 data splits as separate DataFrames.
@@ -347,7 +234,6 @@ def load_twibot_splits_as_dict(
 
     Args:
         data_dir: Path to directory containing train.json, dev.json, test.json
-        label_path: Optional path to external labels CSV
 
     Returns:
         Dictionary with keys 'train', 'val', 'test' mapping to DataFrames
@@ -370,7 +256,7 @@ def load_twibot_splits_as_dict(
     
     splits = {}
     for split_name, split_path in split_files.items():
-        loader = TwiBotDataLoader(json_path=split_path, label_path=label_path)
+        loader = TwiBotDataLoader(json_path=split_path)
         splits[split_name] = loader.load()
     
     return splits
