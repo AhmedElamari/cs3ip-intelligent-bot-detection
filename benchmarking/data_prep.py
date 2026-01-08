@@ -35,14 +35,18 @@ def load_data(data_dir: Path) -> dict:
 
 
 def prepare_data(data, config: Config) -> tuple:
-    """Prepare data: for model training, including feature engineering, preprocessing, 
-    and splitting.
+    """Prepare data: for model training, including feature engineering, preprocessing, and 
+    data splitting (train/val/test).
 
     Args:
         data: Either
-            - Dictionary of data splits keyed by split name to corresponding DataFrame.
-            
-        config: (Config) configuration object holding the configuration for the data preparation.
+            - Dictionary of data splits keyed by split name to corresponding DataFrame 
+            (e.g. {'train': train_df, 'val': val_df, 'test': test_df}).
+            - Single DataFrame containing features and a ''"label"'' column, 
+            which will be split into train/val/test sets according to ''config''.
+        config (Config): Configuration object controlling random seed, split sizes and preprocessing options
+        such as imbalance handling, feature scaling and feature selection.
+        
 
     Returns:
         Tuple containing the training, validation, and test data splits, as well as the feature names.
