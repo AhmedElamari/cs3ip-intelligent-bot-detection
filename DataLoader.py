@@ -159,7 +159,8 @@ class TwiBotDataLoader:
                 return 1
             if normalized in ("false", "0", ""):
                 return 0
-            return 1  # Non-empty strings are truthy
+            # Any other non-empty string is treated as truthy (e.g., "yes", "on")
+            return 1
         
         return int(bool(value))
 

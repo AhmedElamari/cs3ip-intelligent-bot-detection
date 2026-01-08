@@ -91,12 +91,12 @@ def run_pipeline(
     # Preprocessing each split
     print("\nPreprocessing data...")
     detector = BotDetector()
-    processed = {}
-    for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
-        detector.data = df
-        processed[name] = detector.preprocess()
+    dataframes = {'train': train_df, 'val': val_df, 'test': test_df}
+    for name in split_names:
+        detector.data = dataframes[name]
+        dataframes[name] = detector.preprocess()
     
-    train_df, val_df, test_df = processed['train'], processed['val'], processed['test']
+    train_df, val_df, test_df = dataframes['train'], dataframes['val'], dataframes['test']
 
     # Extract features
     feature_names = (
@@ -106,11 +106,15 @@ def run_pipeline(
         .tolist()
     )
 
-    # Ensure all splits have the same features
-    for df in (val_df, test_df):
+    # Ensure all splits have the same features (modifies DataFrames in place)
+    for name in ('val', 'test'):
+        df = dataframes[name]
         missing = [col for col in feature_names if col not in df.columns]
         if missing:
             df[missing] = 0
+            dataframes[name] = df
+    
+    val_df, test_df = dataframes['val'], dataframes['test']
 
     X_train = train_df[feature_names]
     y_train = train_df['label']
