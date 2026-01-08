@@ -107,15 +107,10 @@ def prepare_data(data, config: Config) -> tuple:
         .columns
         .tolist()
     )
-
-    for df_name, df in (('val', val_df), ('test', test_df)):
+    for df in [val_df, test_df]:
         missing = [col for col in feature_names if col not in df.columns]
         if missing:
             df[missing] = 0
-        if df_name == 'val':
-            val_df = df
-        else:
-            test_df = df
 
     X_train = train_df[feature_names]
     y_train = train_df['label']
