@@ -146,7 +146,7 @@ def main():
     if args.explain or config.get('explainability.enabled'):
         xai_results = run_explainability_analysis(
             benchmark,
-            X_train, X_test, y_test,
+            X_train, X_test,
             feature_names,
             config,
             output_dir
