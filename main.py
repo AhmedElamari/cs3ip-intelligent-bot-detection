@@ -41,8 +41,6 @@ def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> 
     return df
 
 
-
-
 def run_pipeline(
     model_type: str = 'random_forest',
     use_smote: bool = False,

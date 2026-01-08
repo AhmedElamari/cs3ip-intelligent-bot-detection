@@ -19,7 +19,8 @@ class BenchmarkSmokeTest(unittest.TestCase):
         import numpy as np
         import pandas as pd
 
-        from benchmark import prepare_data, create_models
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
         from config import Config
 
@@ -51,7 +52,12 @@ class BenchmarkSmokeTest(unittest.TestCase):
         for model_name in config.get('models', {}).keys():
             config.set(f'models.{model_name}.enabled', model_name == 'logistic_regression')
 
-        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(df, config)
+        train_df = df.iloc[:20].copy()
+        val_df = df.iloc[20:25].copy()
+        test_df = df.iloc[25:].copy()
+        splits = {"train": train_df, "val": val_df, "test": test_df}
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
         models = create_models(config)
 
         benchmark = ModelBenchmark(models=models, experiment_name='smoke')

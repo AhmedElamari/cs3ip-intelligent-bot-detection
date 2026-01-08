@@ -69,7 +69,8 @@ class SHAPExplainer:
             if isinstance(X, pd.DataFrame):
                 X_background = X.sample(n=max_samples, random_state=2112)
             else:
-                indices = np.random.choice(len(X), max_samples, replace=False)
+                rng = np.random.RandomState(2112)
+                indices = rng.choice(len(X), max_samples, replace=False)
                 X_background = X[indices]
         else:
             X_background = X

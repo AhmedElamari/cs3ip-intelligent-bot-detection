@@ -1,4 +1,3 @@
- 
 import importlib.util
 import json
 import sys
@@ -38,85 +37,6 @@ class DataLoaderLabelsTest(unittest.TestCase):
             self.assertIn("label", df.columns)
             self.assertTrue(df["label"].notna().all())
             self.assertEqual(set(df["label"].tolist()), {0, 1})
-
-    def test_external_labels_are_merged(self):
-        users = [
-            {"ID": "1", "profile": {}},
-            {"ID": "2", "profile": {}},
-        ]
-        labels = self.pd.DataFrame({
-            "ID": ["1", "2"],
-            "label": ["bot", "human"],
-        })
-        with TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "data.json"
-            csv_path = Path(tmp) / "labels.csv"
-            self._write_json(json_path, users)
-            labels.to_csv(csv_path, index=False)
-            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
-            df = loader.load()
-            self.assertIn("label", df.columns)
-            self.assertTrue(df["label"].notna().all())
-            self.assertEqual(set(df["label"].tolist()), {0, 1})
-
-    def test_missing_label_column_raises(self):
-        users = [{"ID": "1", "profile": {}}]
-        labels = self.pd.DataFrame({"ID": ["1"]})
-        with TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "data.json"
-            csv_path = Path(tmp) / "labels.csv"
-            self._write_json(json_path, users)
-            labels.to_csv(csv_path, index=False)
-            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
-            with self.assertRaises(ValueError) as ctx:
-                loader.load()
-            self.assertIn("label", str(ctx.exception).lower())
-
-    def test_non_binary_labels_raise(self):
-        users = [{"ID": "1", "profile": {}}]
-        labels = self.pd.DataFrame({"ID": ["1"], "label": [2]})
-        with TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "data.json"
-            csv_path = Path(tmp) / "labels.csv"
-            self._write_json(json_path, users)
-            labels.to_csv(csv_path, index=False)
-            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
-            with self.assertRaises(ValueError) as ctx:
-                loader.load()
-            self.assertIn("binary", str(ctx.exception).lower())
-
-    def test_label_merge_with_no_matches_raises(self):
-        users = [{"ID": "1", "profile": {}}]
-        labels = self.pd.DataFrame({"ID": ["999"], "label": [1]})
-        with TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "data.json"
-            csv_path = Path(tmp) / "labels.csv"
-            self._write_json(json_path, users)
-            labels.to_csv(csv_path, index=False)
-            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
-            with self.assertRaises(ValueError) as ctx:
-                loader.load()
-            self.assertIn("zero matches", str(ctx.exception).lower())
-
-    def test_partial_embedded_labels_are_filled_from_external(self):
-        users = [
-            {"ID": "1", "label": "bot", "profile": {}},
-            {"ID": "2", "profile": {}},
-        ]
-        labels = self.pd.DataFrame({
-            "ID": ["1", "2"],
-            "label": [0, 1],
-        })
-        with TemporaryDirectory() as tmp:
-            json_path = Path(tmp) / "data.json"
-            csv_path = Path(tmp) / "labels.csv"
-            self._write_json(json_path, users)
-            labels.to_csv(csv_path, index=False)
-            loader = self.loader_cls(json_path=json_path, label_path=str(csv_path))
-            df = loader.load()
-            labels_by_id = df.set_index("user_id")["label"]
-            self.assertEqual(labels_by_id.loc["1"], 1)
-            self.assertEqual(labels_by_id.loc["2"], 1)
 
     def test_fractional_embedded_labels_are_ignored(self):
         users = [

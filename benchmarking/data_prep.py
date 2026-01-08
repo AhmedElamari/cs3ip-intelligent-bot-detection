@@ -1,0 +1,153 @@
+"""
+Data preparation helpers for the benchmark pipeline.
+"""
+
+from pathlib import Path
+
+import numpy as np
+
+from DataLoader import load_twibot_splits_as_dict
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+from Preprocessing import BotDetector
+from config import Config
+
+
+def load_data(data_dir: Path) -> dict:
+    """Load TwiBot-20 JSON split data from the local data/ directory.
+
+    Args:
+        data_dir: Path to the directory containing the TwiBot-20 JSON splits 
+        (e.g. data/train.json, data/dev.json, data/test.json)
+
+    Returns:
+        Dictionary of data splits keyed by split name to corresponding DataFrame.
+        For example, {
+            'train': train_df,
+            'val': val_df,
+            'test': test_df,
+        }.
+    """
+    print(f"Detected pre-split dataset under {data_dir} (train/dev/test).")
+    splits = load_twibot_splits_as_dict(data_dir)
+    for name, df in splits.items():
+        print(f"{name} split: {len(df)} samples")
+    return splits
+
+
+def prepare_data(data, config: Config) -> tuple:
+    """Prepare data for model training with feature engineering and preprocessing.
+
+    Args:
+        data: Dictionary of data splits keyed by split name to corresponding DataFrame
+            (e.g. {'train': train_df, 'val': val_df, 'test': test_df}).
+        config: Configuration object controlling preprocessing options
+            such as imbalance handling, feature scaling, and feature selection.
+
+    Returns:
+        Tuple containing the training, validation, and test splits plus feature names.
+    """
+    print("\n" + "=" * 60)
+    print("DATA PREPARATION")
+    print("=" * 60)
+
+    if not isinstance(data, dict):
+        raise TypeError(
+            "prepare_data expects a dict with 'train', 'val', and 'test' DataFrames."
+        )
+
+    splits = data
+    train_df = splits['train'].copy()
+    val_df = splits['val'].copy()
+    test_df = splits['test'].copy()
+
+    # Check for labels in each split
+    cleaned = {}
+    for name, df in [('train', train_df), ('val', val_df), ('test', test_df)]:
+        if 'label' not in df.columns:
+            raise ValueError(f"No 'label' column found in {name} split")
+        df = df.dropna(subset=['label'])
+        if df.empty:
+            raise ValueError(
+                f"{name} split has no labeled rows after dropping missing labels."
+            )
+        cleaned[name] = df
+
+    train_df = cleaned['train']
+    val_df = cleaned['val']
+    test_df = cleaned['test']
+
+    # Derive reference date from training data only (avoid leakage)
+    reference_date = derive_reference_date(train_df)
+
+    # Feature engineering on each split
+    print("\nExtracting features...")
+    extractor = BotFeatureExtractor(reference_date=reference_date)
+    train_df = extractor.extract_all_features(train_df)
+    print(f"Extracted {len(extractor.get_feature_names())} features")
+    val_df = extractor.extract_all_features(val_df)
+    test_df = extractor.extract_all_features(test_df)
+
+    # Preprocessing on each split
+    print("\nPreprocessing...")
+    detector = BotDetector()
+
+    detector.data = train_df
+    train_df = detector.preprocess()
+
+    detector.data = val_df
+    val_df = detector.preprocess()
+
+    detector.data = test_df
+    test_df = detector.preprocess()
+
+    # Extract features and labels
+    feature_names = (
+        train_df.drop(columns=['label'])
+        .select_dtypes(include=[np.number])
+        .columns
+        .tolist()
+    )
+    for df in [val_df, test_df]:
+        missing = [col for col in feature_names if col not in df.columns]
+        if missing:
+            df[missing] = 0
+
+    X_train = train_df[feature_names]
+    y_train = train_df['label']
+    X_val = val_df[feature_names]
+    y_val = val_df['label']
+    X_test = test_df[feature_names]
+    y_test = test_df['label']
+
+    print("\nFinal data shapes (using provided splits):")
+
+    # Reset detector for potential reuse
+    detector = BotDetector()
+
+    # Handle imbalance if configured
+    if config.get('preprocessing.handle_imbalance'):
+        method = config.get('preprocessing.imbalance_method', 'smote')
+        print(f"\nApplying {method.upper()} for class balancing...")
+        X_train, y_train = detector.handle_imbalance(X_train, y_train, method=method)
+
+    # Scale features if configured
+    if config.get('preprocessing.scale_features'):
+        print("\nScaling features...")
+        X_train, X_val, X_test = detector.scale_features(X_train, X_val, X_test)
+
+    # Feature selection if configured
+    if config.get('preprocessing.feature_selection'):
+        n_features = config.get('preprocessing.n_features', 20)
+        print(f"\nSelecting top {n_features} features...")
+        X_train = detector.select_features(X_train, y_train, k=n_features)
+        X_val = detector.apply_feature_selection(X_val)
+        X_test = detector.apply_feature_selection(X_test)
+        # Update feature names
+        selected_indices = detector.selected_features
+        feature_names = [feature_names[i] for i in selected_indices]
+
+    print(f"  Training:   {X_train.shape}")
+    print(f"  Validation: {X_val.shape}")
+    print(f"  Test:       {X_test.shape}")
+
+    return X_train, X_val, X_test, y_train, y_val, y_test, feature_names
