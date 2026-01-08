@@ -14,9 +14,10 @@ Returns:
 import matplotlib.pyplot as plt
 from pathlib import Path
 from config import Config
+from benchmarking import ModelBenchmark
 
 
-def save_comparison_outputs(benchmark, output_dir: Path, config: Config) -> None:
+def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
     """Save comparison tables and plots.
     This function saves the comparison table and plots for the benchmark pipeline.
 
@@ -63,3 +64,4 @@ def save_final_outputs(benchmark, output_dir: Path, config: Config) -> None:
         f.write(report)
 
     config.to_json(output_dir / 'config.json')
+    print(f"Saved benchmark report to {output_dir / 'benchmark_report.txt'}")

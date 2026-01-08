@@ -7,7 +7,6 @@ from typing import Optional, List, Union
 
 __all__ = [
     "TwiBotDataLoader",
-    "load_twibot_json",
     "load_twibot_splits_as_dict",
 ]
 
@@ -15,9 +14,7 @@ __all__ = [
 class TwiBotDataLoader:
     """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame.
     
-    Supports:
-    - Single JSON file with embedded labels
-    - Multiple JSON files (train/dev/test splits) with embedded labels
+    Intended for JSON files with embedded labels, used via train/dev/test splits.
     """
 
     TWITTER_DATE_FORMAT = "%a %b %d %H:%M:%S %z %Y"
@@ -224,20 +221,6 @@ class TwiBotDataLoader:
         """Main entry point: load and return flattened DataFrame."""
         self.load_json()
         return self.flatten_to_dataframe()
-
-
-def load_twibot_json(json_path: str) -> pd.DataFrame:
-    """
-    Convenience function to load TwiBot-20 JSON data.
-
-    Args:
-        json_path: Path to TwiBot-20 JSON file
-
-    Returns:
-        Flattened pandas DataFrame ready for preprocessing
-    """
-    loader = TwiBotDataLoader(json_path=json_path)
-    return loader.load()
 
 
 def load_twibot_splits_as_dict(
