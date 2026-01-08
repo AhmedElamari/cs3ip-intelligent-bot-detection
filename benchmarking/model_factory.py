@@ -1,7 +1,7 @@
 """
 Model factory helpers for the benchmark pipeline.
 """
-
+from typing import Any
 from config import Config
 from models import (
     LogisticRegressionModel,
@@ -12,7 +12,7 @@ from models import (
 )
 
 
-def create_models(config: Config) -> dict:
+def create_models(config: Config) -> dict[str, Any]:
     """Create model instances based on configuration."""
     models = {}
 
