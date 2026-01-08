@@ -55,8 +55,15 @@ def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config:
             print(f"Warning: Could not save plots: {e}")
 
 
-def save_final_outputs(benchmark, output_dir: Path, config: Config) -> None:
-    """Save benchmark results, report, and config."""
+def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
+    """Save benchmark results, report, and config.
+    This function saves the benchmark results, report, and config to the output directory.
+
+    Args:
+        benchmark: The benchmark pipeline object holding trained models and results.
+        output_dir: Path to directory where benchmark results, report, and config will be saved
+        config: Configuration object holding output settings
+    """
     benchmark.save_results(output_dir)
 
     report = benchmark.generate_report()
