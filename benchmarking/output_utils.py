@@ -1,9 +1,18 @@
 """
 Output helpers for the benchmark pipeline.
+This module contains functions to save the comparison tables and plots for the benchmark pipeline.
+It also contains a function to save the final outputs of the benchmark pipeline.
+
+Args:
+    benchmark: The benchmark pipeline object holding trained models and results.
+    output_dir: Path to directory where comparison tables and plots will be saved
+    config: Configuration object holding output settings
+
+Returns:
+    None
 """
-
+import matplotlib.pyplot as plt
 from pathlib import Path
-
 from config import Config
 
 
@@ -30,6 +39,7 @@ def save_comparison_outputs(benchmark, output_dir: Path, config: Config) -> None
                 dpi=150,
                 bbox_inches='tight'
             )
+            plt.close(fig)
 
             # Training times
             fig = benchmark.plot_training_times()
@@ -38,7 +48,7 @@ def save_comparison_outputs(benchmark, output_dir: Path, config: Config) -> None
                 dpi=150,
                 bbox_inches='tight'
             )
-
+            plt.close(fig)
             print(f"Saved performance plots to {output_dir}")
         except Exception as e:
             print(f"Warning: Could not save plots: {e}")

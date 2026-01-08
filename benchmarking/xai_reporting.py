@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from config import Config
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
@@ -16,7 +17,6 @@ def run_explainability_analysis(
     benchmark: Any,
     X_train: np.ndarray,
     X_test: np.ndarray,
-    y_test: np.ndarray,
     feature_names: list,
     config: Config,
     output_dir: Path
@@ -32,7 +32,6 @@ def run_explainability_analysis(
         X_train: Training feature matrix to fit models as Numpy array (N_train x N_features)
         X_test: Test feature matrix on which explainations are to 
             be computed. This is expected to be a Numpy array (N_test x N_features)
-        y_test: Test label vector as Numpy array (N_test,)
         feature_names: List of feature names as strings in column 
             order of X_train and X_test.
         config: Configuration object holding explainability settings
@@ -92,6 +91,7 @@ def run_explainability_analysis(
                         dpi=150,
                         bbox_inches='tight'
                     )
+                    plt.close(fig)
                     print("\nSaved feature importance plot")
                 except Exception as e:
                     print(f"Could not save plot: {e}")
@@ -182,11 +182,13 @@ def run_explainability_analysis(
                             X_test[:min(50, len(X_test))],
                             max_display=10
                         )
+                        
                         fig.savefig(
                             output_dir / f'shap_summary_{model_name}.png',
                             dpi=150,
                             bbox_inches='tight'
                         )
+                        plt.close(fig)
                     except Exception as e:
                         print(f"Could not save SHAP plot: {e}")
 
