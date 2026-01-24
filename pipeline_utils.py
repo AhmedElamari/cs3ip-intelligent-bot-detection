@@ -64,6 +64,12 @@ def time_stratified_split(
         )
         empty = df.copy()
         return empty, empty.copy(), empty.copy()
+    if not 0 < val_size < 1:
+        raise ValueError("val_size must be between 0 and 1 (exclusive).")
+    if not 0 < test_size < 1:
+        raise ValueError("test_size must be between 0 and 1 (exclusive).")
+    if val_size + test_size >= 1:
+        raise ValueError("val_size + test_size must be less than 1.0.")
     if time_col not in df.columns:
         LOGGER.warning(
             "Time column '%s' not found. Falling back to row order; "
@@ -98,6 +104,15 @@ def time_stratified_split(
     n = len(df_sorted)
     train_end = int(n * (1 - val_size - test_size))
     val_end = int(n * (1 - test_size))
+    train_count = train_end
+    val_count = val_end - train_end
+    test_count = n - val_end
+    if min(train_count, val_count, test_count) < 1:
+        raise ValueError(
+            "Time-stratified split requires at least 1 sample per split; "
+            f"got train={train_count}, val={val_count}, test={test_count} from n={n}. "
+            "Adjust val_size/test_size or provide more data."
+        )
     
     # Split chronologically: train oldest, val middle, test newest
     train_df = (
