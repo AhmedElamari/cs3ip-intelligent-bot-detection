@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -56,6 +57,27 @@ class TimeStratifiedSplitTest(unittest.TestCase):
         self.assertEqual(len(train_df), 70)  # 1 - 0.2 - 0.1 = 0.7
         self.assertEqual(len(val_df), 20)    # 0.2
         self.assertEqual(len(test_df), 10)   # 0.1
+
+    def test_invalid_split_sizes_raise(self):
+        """Verify invalid split sizes raise a ValueError."""
+        df = self.pd.DataFrame({
+            'account_creation_date': self.pd.date_range('2020-01-01', periods=10),
+            'label': [i % 2 for i in range(10)]
+        })
+
+        with self.assertRaises(ValueError):
+            self.time_stratified_split(df, val_size=0.6, test_size=0.5, random_state=2112)
+
+    def test_too_small_dataset_raises(self):
+        """Verify too-small datasets raise when a split would be empty."""
+        df = self.pd.DataFrame({
+            'account_creation_date': self.pd.date_range('2020-01-01', periods=3),
+            'label': [0, 1, 0],
+            'id': list(range(3))
+        })
+
+        with self.assertRaises(ValueError):
+            self.time_stratified_split(df, val_size=0.2, test_size=0.1, random_state=2112)
 
     def test_small_dataset_splits(self):
         """Verify small datasets still split without errors."""
@@ -249,6 +271,94 @@ class TimeStratifiedSplitTest(unittest.TestCase):
         self.assertGreater(
             wrong_tpd_mean, correct_tpd_mean * 2,
             "Wrong reference should cause significantly inflated tweets_per_day"
+        )
+
+    def test_prepare_data_time_split_uses_combined_reference_date(self):
+        """Integration test: prepare_data should avoid clipped ages in val/test."""
+        from benchmarking.data_prep import prepare_data
+        from config import Config
+
+        n = 30
+        df_all = self.pd.DataFrame({
+            'account_creation_date': self.pd.date_range('2020-01-01', periods=n, freq='D'),
+            'label': [i % 2 for i in range(n)],
+            'statuses_count': [100 + i for i in range(n)],
+            'followers_count': [200 + i for i in range(n)],
+            'favourites_count': [50 + i for i in range(n)],
+        })
+
+        splits = {
+            'train': df_all.iloc[:10].copy(),
+            'val': df_all.iloc[10:20].copy(),
+            'test': df_all.iloc[20:].copy(),
+        }
+
+        config = Config({'time_split': True})
+        X_train, X_val, X_test, *_ = prepare_data(splits, config)
+
+        self.assertIn('account_age_days', X_val.columns)
+        self.assertIn('account_age_days', X_test.columns)
+        self.assertTrue(
+            (X_val['account_age_days'] > 1).any(),
+            "Validation ages should not all be clipped to 1 with time_split enabled"
+        )
+        self.assertTrue(
+            (X_test['account_age_days'] > 1).any(),
+            "Test ages should not all be clipped to 1 with time_split enabled"
+        )
+
+    def test_main_pipeline_time_split_uses_combined_reference_date(self):
+        """Integration test: main pipeline should avoid clipped ages in val/test."""
+        import main
+        import training
+
+        n = 30
+        df_all = self.pd.DataFrame({
+            'account_creation_date': self.pd.date_range('2020-01-01', periods=n, freq='D'),
+            'label': [i % 2 for i in range(n)],
+            'statuses_count': [100 + i for i in range(n)],
+            'followers_count': [200 + i for i in range(n)],
+            'favourites_count': [50 + i for i in range(n)],
+        })
+
+        splits = {
+            'train': df_all.iloc[:10].copy(),
+            'val': df_all.iloc[10:20].copy(),
+            'test': df_all.iloc[20:].copy(),
+        }
+
+        captured = {}
+
+        def capture_and_train(X_train, X_val, X_test, y_train, y_val, y_test, **kwargs):
+            captured['X_val'] = X_val
+            captured['X_test'] = X_test
+            return training.train_and_evaluate(
+                X_train, X_val, X_test,
+                y_train, y_val, y_test,
+                **kwargs
+            )
+
+        with patch.object(main, 'load_and_prepare_data', return_value=splits), \
+             patch.object(main, 'train_and_evaluate', side_effect=capture_and_train):
+            main.run_pipeline(
+                model_type='random_forest',
+                use_smote=False,
+                use_scaling=False,
+                num_features=None,
+                use_time_split=True
+            )
+
+        self.assertIn('X_val', captured)
+        self.assertIn('X_test', captured)
+        self.assertIn('account_age_days', captured['X_val'].columns)
+        self.assertIn('account_age_days', captured['X_test'].columns)
+        self.assertTrue(
+            (captured['X_val']['account_age_days'] > 1).any(),
+            "Validation ages should not all be clipped to 1 in main pipeline"
+        )
+        self.assertTrue(
+            (captured['X_test']['account_age_days'] > 1).any(),
+            "Test ages should not all be clipped to 1 in main pipeline"
         )
 
 
