@@ -26,6 +26,7 @@ class Config:
         'random_state': 2112,
         'test_size': 0.1,
         'val_size': 0.2,
+        'time_split': False,  # Use chronological splitting to combat data drift
         
         'preprocessing': {
             'handle_imbalance': False,
@@ -299,6 +300,7 @@ CONFIG_TEMPLATE = """
 random_state: 2112
 test_size: 0.1
 val_size: 0.2
+time_split: false  # Use chronological splitting to combat data drift
 
 preprocessing:
   handle_imbalance: false

@@ -5,11 +5,13 @@ Data preparation helpers for the benchmark pipeline.
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
 from config import Config
+from pipeline_utils import time_stratified_split
 
 
 def load_data(data_dir: Path) -> dict:
@@ -76,8 +78,30 @@ def prepare_data(data, config: Config) -> tuple:
     val_df = cleaned['val']
     test_df = cleaned['test']
 
-    # Derive reference date from training data only (avoid leakage)
-    reference_date = derive_reference_date(train_df)
+    # Apply time-stratified split if enabled (combats data drift)
+    if config.get('time_split'):
+        print("\nApplying time-stratified split (chronological ordering)...")
+        combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
+        # Derive reference date from ALL data BEFORE splitting to avoid negative ages
+        # (training data will contain oldest accounts after split)
+        reference_date = derive_reference_date(combined)
+        train_df, val_df, test_df = time_stratified_split(
+            combined,
+            val_size=config.get('val_size', 0.2),
+            test_size=config.get('test_size', 0.1),
+            time_col='account_creation_date',
+            random_state=config.get('random_state', 2112)
+        )
+        print(f"  Train (oldest):   {len(train_df)} samples")
+        print(f"  Val (middle):     {len(val_df)} samples")
+        print(f"  Test (newest):    {len(test_df)} samples")
+    else:
+        # Standard split: derive reference date from training data only (avoid leakage)
+        reference_date = derive_reference_date(train_df)
+
+    # Log reference date for transparency
+    if reference_date is not None:
+        print(f"\nReference date for age features: {reference_date.date()}")
 
     # Feature engineering on each split
     print("\nExtracting features...")
