@@ -10,14 +10,19 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Optional
+from config import Config
 from DataLoader import load_twibot_splits_as_dict
-from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from training import train_and_evaluate
-from pipeline_utils import time_stratified_split
+from pipeline_utils import apply_time_split_if_enabled
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
+DEFAULTS = Config.DEFAULTS
+DEFAULT_RANDOM_STATE = DEFAULTS['random_state']
+DEFAULT_TEST_SIZE = DEFAULTS['test_size']
+DEFAULT_VAL_SIZE = DEFAULTS['val_size']
 
 
 def load_and_prepare_data() -> dict:
@@ -47,7 +52,10 @@ def run_pipeline(
     use_smote: bool = False,
     use_scaling: bool = False,
     num_features: Optional[int] = None,
-    use_time_split: bool = False
+    use_time_split: bool = False,
+    val_size: float = DEFAULT_VAL_SIZE,
+    test_size: float = DEFAULT_TEST_SIZE,
+    random_state: int = DEFAULT_RANDOM_STATE
 ):
     """Run the complete bot detection pipeline on TwiBot-20.
     
@@ -57,6 +65,9 @@ def run_pipeline(
         use_scaling: Apply feature scaling
         num_features: Number of features to select (None = all)
         use_time_split: Use chronological splitting to combat data drift
+        val_size: Fraction of data for validation split (time split only)
+        test_size: Fraction of data for test split (time split only)
+        random_state: Random seed for time-split shuffling
     """
     
     print("=" * 60)
@@ -86,23 +97,24 @@ def run_pipeline(
     # Apply time-stratified split if enabled (combats data drift)
     if use_time_split:
         print("\nApplying time-stratified split (chronological ordering)...")
-        combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
-        # Derive reference date from ALL data BEFORE splitting to avoid negative ages
-        # (training data will contain oldest accounts after split)
-        reference_date = derive_reference_date(combined)
-        train_df, val_df, test_df = time_stratified_split(
-            combined,
-            val_size=0.2,
-            test_size=0.1,
-            time_col='account_creation_date',
-            random_state=2112
-        )
+        # Derive reference date from ALL data BEFORE splitting:
+        # - Avoids negative "age" features for newer accounts.
+        # - With chronological splitting, all accounts already exist at or before
+        #   this max-date reference, so this does not leak future labels.
+    train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
+        train_df,
+        val_df,
+        test_df,
+        use_time_split=use_time_split,
+        val_size=val_size,
+        test_size=test_size,
+        time_col='account_creation_date',
+        random_state=random_state
+    )
+    if use_time_split:
         print(f"  Train (oldest):   {len(train_df)} samples")
         print(f"  Val (middle):     {len(val_df)} samples")
         print(f"  Test (newest):    {len(test_df)} samples")
-    else:
-        # Standard split: derive reference date from training data only (avoid leakage)
-        reference_date = derive_reference_date(train_df)
 
     # Log reference date for transparency
     if reference_date is not None:
@@ -231,6 +243,24 @@ def main():
         action='store_true',
         help='Use chronological splitting to combat data drift (train oldest, test newest)'
     )
+    parser.add_argument(
+        '--val-size',
+        type=float,
+        default=DEFAULT_VAL_SIZE,
+        help='Validation split fraction for time split'
+    )
+    parser.add_argument(
+        '--test-size',
+        type=float,
+        default=DEFAULT_TEST_SIZE,
+        help='Test split fraction for time split'
+    )
+    parser.add_argument(
+        '--random-state',
+        type=int,
+        default=DEFAULT_RANDOM_STATE,
+        help='Random seed for time-split shuffling'
+    )
     
     args = parser.parse_args()
     
@@ -239,7 +269,10 @@ def main():
         use_smote=args.smote,
         use_scaling=args.scale,
         num_features=args.features,
-        use_time_split=args.time_split
+        use_time_split=args.time_split,
+        val_size=args.val_size,
+        test_size=args.test_size,
+        random_state=args.random_state
     )
 
 

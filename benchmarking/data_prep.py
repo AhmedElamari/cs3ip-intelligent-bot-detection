@@ -8,10 +8,10 @@ import numpy as np
 import pandas as pd
 
 from DataLoader import load_twibot_splits_as_dict
-from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from config import Config
-from pipeline_utils import time_stratified_split
+from pipeline_utils import apply_time_split_if_enabled
 
 
 def load_data(data_dir: Path) -> dict:
@@ -79,25 +79,27 @@ def prepare_data(data, config: Config) -> tuple:
     test_df = cleaned['test']
 
     # Apply time-stratified split if enabled (combats data drift)
-    if config.get('time_split'):
+    use_time_split = config.get('time_split')
+    if use_time_split:
         print("\nApplying time-stratified split (chronological ordering)...")
-        combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
-        # Derive reference date from ALL data BEFORE splitting to avoid negative ages
-        # (training data will contain oldest accounts after split)
-        reference_date = derive_reference_date(combined)
-        train_df, val_df, test_df = time_stratified_split(
-            combined,
-            val_size=config.get('val_size', 0.2),
-            test_size=config.get('test_size', 0.1),
-            time_col='account_creation_date',
-            random_state=config.get('random_state', 2112)
-        )
+        # Derive reference date from ALL data BEFORE splitting:
+        # - Avoids negative "age" features for newer accounts.
+        # - With chronological splitting, all accounts already exist at or before
+        #   this max-date reference, so this does not leak future labels.
+    train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
+        train_df,
+        val_df,
+        test_df,
+        use_time_split=use_time_split,
+        val_size=config.get('val_size', 0.2),
+        test_size=config.get('test_size', 0.1),
+        time_col='account_creation_date',
+        random_state=config.get('random_state', 2112)
+    )
+    if use_time_split:
         print(f"  Train (oldest):   {len(train_df)} samples")
         print(f"  Val (middle):     {len(val_df)} samples")
         print(f"  Test (newest):    {len(test_df)} samples")
-    else:
-        # Standard split: derive reference date from training data only (avoid leakage)
-        reference_date = derive_reference_date(train_df)
 
     # Log reference date for transparency
     if reference_date is not None:
