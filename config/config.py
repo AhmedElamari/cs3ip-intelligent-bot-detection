@@ -27,14 +27,6 @@ class Config:
         'test_size': 0.1,
         'val_size': 0.2,
         
-        'data_splitting': {
-            'use_time_stratified': False,
-            'time_column': 'account_creation_date',
-            'train_size': 0.7,
-            'val_size': 0.15,
-            'test_size': 0.15,
-        },
-        
         'preprocessing': {
             'handle_imbalance': False,
             'imbalance_method': 'smote',
