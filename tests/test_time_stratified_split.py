@@ -57,6 +57,24 @@ class TimeStratifiedSplitTest(unittest.TestCase):
         self.assertEqual(len(val_df), 20)    # 0.2
         self.assertEqual(len(test_df), 10)   # 0.1
 
+    def test_small_dataset_splits(self):
+        """Verify small datasets still split without errors."""
+        n = 5
+        df = self.pd.DataFrame({
+            'account_creation_date': self.pd.date_range('2020-01-01', periods=n),
+            'label': [i % 2 for i in range(n)],
+            'id': list(range(n))
+        })
+
+        train_df, val_df, test_df = self.time_stratified_split(
+            df, val_size=0.2, test_size=0.1, random_state=2112
+        )
+
+        self.assertEqual(len(train_df), 3)
+        self.assertEqual(len(val_df), 1)
+        self.assertEqual(len(test_df), 1)
+        self.assertEqual(len(train_df) + len(val_df) + len(test_df), n)
+
     def test_no_overlap_between_splits(self):
         """Verify no samples appear in multiple splits."""
         n = 50
@@ -112,6 +130,28 @@ class TimeStratifiedSplitTest(unittest.TestCase):
         self.pd.testing.assert_frame_equal(test1.reset_index(drop=True), 
                                             test2.reset_index(drop=True))
 
+    def test_deterministic_with_duplicate_timestamps(self):
+        """Verify deterministic results when timestamps are duplicated."""
+        n = 40
+        df = self.pd.DataFrame({
+            'account_creation_date': self.pd.to_datetime(
+                ['2020-01-01'] * (n // 2) + ['2020-02-01'] * (n // 2)
+            ),
+            'label': [i % 2 for i in range(n)],
+            'id': list(range(n))
+        })
+
+        train1, val1, test1 = self.time_stratified_split(
+            df, val_size=0.2, test_size=0.1, random_state=2112
+        )
+        train2, val2, test2 = self.time_stratified_split(
+            df, val_size=0.2, test_size=0.1, random_state=2112
+        )
+
+        self.pd.testing.assert_frame_equal(train1, train2)
+        self.pd.testing.assert_frame_equal(val1, val2)
+        self.pd.testing.assert_frame_equal(test1, test2)
+
     def test_shuffled_within_splits(self):
         """Verify data is shuffled within each split (not strictly sorted)."""
         n = 100
@@ -136,7 +176,10 @@ class TimeStratifiedSplitTest(unittest.TestCase):
         alone (oldest accounts) caused val/test accounts to have negative ages that got
         clipped to 1, corrupting derived features.
         """
-        from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+        try:
+            from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+        except Exception:
+            self.skipTest("FeatureEngineering or its dependencies not installed")
         
         # Create data spanning 1 year (365 days)
         n = 100

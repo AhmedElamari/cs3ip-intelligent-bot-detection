@@ -58,24 +58,63 @@ def time_stratified_split(
     Returns:
         Tuple of (train_df, val_df, test_df) DataFrames
     """
+    if df.empty:
+        LOGGER.warning(
+            "Received empty DataFrame for time-stratified split; returning empty splits."
+        )
+        empty = df.copy()
+        return empty, empty.copy(), empty.copy()
     if time_col not in df.columns:
         LOGGER.warning(
-            "Time column '%s' not found. Falling back to index-based split.",
+            "Time column '%s' not found. Falling back to row order; "
+            "this may not reflect chronology.",
             time_col
         )
         # Fall back to using row order as proxy for time
         df_sorted = df.reset_index(drop=True)
     else:
-        df_sorted = df.sort_values(time_col).reset_index(drop=True)
+        time_values = pd.to_datetime(df[time_col], errors='coerce')
+        missing_mask = time_values.isna()
+        if missing_mask.any():
+            LOGGER.warning(
+                "Column '%s' contains %d missing values; treating them as oldest.",
+                time_col,
+                missing_mask.sum()
+            )
+        df_sorted = (
+            df.assign(
+                _time_sort=time_values,
+                _original_order=range(len(df))
+            )
+            .sort_values(
+                by=['_time_sort', '_original_order'],
+                kind='mergesort',
+                na_position='first'
+            )
+            .drop(columns=['_time_sort', '_original_order'])
+            .reset_index(drop=True)
+        )
     
     n = len(df_sorted)
     train_end = int(n * (1 - val_size - test_size))
     val_end = int(n * (1 - test_size))
     
     # Split chronologically: train oldest, val middle, test newest
-    train_df = df_sorted.iloc[:train_end].sample(frac=1, random_state=random_state)
-    val_df = df_sorted.iloc[train_end:val_end].sample(frac=1, random_state=random_state)
-    test_df = df_sorted.iloc[val_end:].sample(frac=1, random_state=random_state)
+    train_df = (
+        df_sorted.iloc[:train_end]
+        .sample(frac=1, random_state=random_state)
+        .reset_index(drop=True)
+    )
+    val_df = (
+        df_sorted.iloc[train_end:val_end]
+        .sample(frac=1, random_state=random_state)
+        .reset_index(drop=True)
+    )
+    test_df = (
+        df_sorted.iloc[val_end:]
+        .sample(frac=1, random_state=random_state)
+        .reset_index(drop=True)
+    )
     
     LOGGER.info(
         "Time-stratified split: train=%d (oldest), val=%d (middle), test=%d (newest)",
@@ -83,3 +122,32 @@ def time_stratified_split(
     )
     
     return train_df, val_df, test_df
+
+
+def apply_time_split_if_enabled(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    use_time_split: bool,
+    val_size: float = 0.2,
+    test_size: float = 0.1,
+    time_col: str = 'account_creation_date',
+    random_state: int = 2112
+) -> tuple:
+    """Apply time-stratified split and derive reference date when enabled."""
+    from FeatureEngineering import derive_reference_date
+
+    if use_time_split:
+        combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
+        reference_date = derive_reference_date(combined)
+        train_df, val_df, test_df = time_stratified_split(
+            combined,
+            val_size=val_size,
+            test_size=test_size,
+            time_col=time_col,
+            random_state=random_state
+        )
+    else:
+        reference_date = derive_reference_date(train_df)
+
+    return train_df, val_df, test_df, reference_date
