@@ -14,6 +14,7 @@ from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
 from training import train_and_evaluate
+from pipeline_utils import time_stratified_split
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
@@ -45,7 +46,8 @@ def run_pipeline(
     model_type: str = 'random_forest',
     use_smote: bool = False,
     use_scaling: bool = False,
-    num_features: Optional[int] = None
+    num_features: Optional[int] = None,
+    use_time_split: bool = False
 ):
     """Run the complete bot detection pipeline on TwiBot-20.
     
@@ -54,6 +56,7 @@ def run_pipeline(
         use_smote: Apply SMOTE for class balancing
         use_scaling: Apply feature scaling
         num_features: Number of features to select (None = all)
+        use_time_split: Use chronological splitting to combat data drift
     """
     
     print("=" * 60)
@@ -80,8 +83,30 @@ def run_pipeline(
     val_df = split_frames['val']
     test_df = split_frames['test']
 
-    # Derive reference date from training data only
-    reference_date = derive_reference_date(train_df)
+    # Apply time-stratified split if enabled (combats data drift)
+    if use_time_split:
+        print("\nApplying time-stratified split (chronological ordering)...")
+        combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
+        # Derive reference date from ALL data BEFORE splitting to avoid negative ages
+        # (training data will contain oldest accounts after split)
+        reference_date = derive_reference_date(combined)
+        train_df, val_df, test_df = time_stratified_split(
+            combined,
+            val_size=0.2,
+            test_size=0.1,
+            time_col='account_creation_date',
+            random_state=2112
+        )
+        print(f"  Train (oldest):   {len(train_df)} samples")
+        print(f"  Val (middle):     {len(val_df)} samples")
+        print(f"  Test (newest):    {len(test_df)} samples")
+    else:
+        # Standard split: derive reference date from training data only (avoid leakage)
+        reference_date = derive_reference_date(train_df)
+
+    # Log reference date for transparency
+    if reference_date is not None:
+        print(f"\nReference date for age features: {reference_date.date()}")
 
     # Feature engineering on each split
     print("\nExtracting features...")
@@ -201,6 +226,11 @@ def main():
         default=None,
         help='Number of features to select (uses all if not specified)'
     )
+    parser.add_argument(
+        '--time-split',
+        action='store_true',
+        help='Use chronological splitting to combat data drift (train oldest, test newest)'
+    )
     
     args = parser.parse_args()
     
@@ -208,7 +238,8 @@ def main():
         model_type=args.model,
         use_smote=args.smote,
         use_scaling=args.scale,
-        num_features=args.features
+        num_features=args.features,
+        use_time_split=args.time_split
     )
 
 
