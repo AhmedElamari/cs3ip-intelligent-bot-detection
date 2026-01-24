@@ -5,11 +5,13 @@ Data preparation helpers for the benchmark pipeline.
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from DataLoader import load_twibot_splits_as_dict
-from FeatureEngineering import BotFeatureExtractor, derive_reference_date
+from FeatureEngineering import BotFeatureExtractor
 from Preprocessing import BotDetector
 from config import Config
+from pipeline_utils import apply_time_split_if_enabled
 
 
 def load_data(data_dir: Path) -> dict:
@@ -76,8 +78,32 @@ def prepare_data(data, config: Config) -> tuple:
     val_df = cleaned['val']
     test_df = cleaned['test']
 
-    # Derive reference date from training data only (avoid leakage)
-    reference_date = derive_reference_date(train_df)
+    # Apply time-stratified split if enabled (combats data drift)
+    use_time_split = config.get('time_split')
+    if use_time_split:
+        print("\nApplying time-stratified split (chronological ordering)...")
+        # Derive reference date from ALL data BEFORE splitting:
+        # - Avoids negative "age" features for newer accounts.
+        # - With chronological splitting, all accounts already exist at or before
+        #   this max-date reference, so this does not leak future labels.
+    train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
+        train_df,
+        val_df,
+        test_df,
+        use_time_split=use_time_split,
+        val_size=config.get('val_size', 0.2),
+        test_size=config.get('test_size', 0.1),
+        time_col='account_creation_date',
+        random_state=config.get('random_state', 2112)
+    )
+    if use_time_split:
+        print(f"  Train (oldest):   {len(train_df)} samples")
+        print(f"  Val (middle):     {len(val_df)} samples")
+        print(f"  Test (newest):    {len(test_df)} samples")
+
+    # Log reference date for transparency
+    if reference_date is not None:
+        print(f"\nReference date for age features: {reference_date.date()}")
 
     # Feature engineering on each split
     print("\nExtracting features...")
