@@ -37,13 +37,10 @@ def load_and_prepare_data() -> dict:
 def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> pd.DataFrame:
     """Apply feature engineering to the dataset."""
     print("\nExtracting features...")
-    
     extractor = BotFeatureExtractor(reference_date=reference_date)
     df = extractor.extract_all_features(df)
-    
     feature_names = extractor.get_feature_names()
     print(f"Extracted {len(feature_names)} features: {feature_names}")
-    
     return df
 
 
