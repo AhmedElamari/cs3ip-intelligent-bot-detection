@@ -8,10 +8,16 @@ import numpy as np
 import pandas as pd
 
 from DataLoader import load_twibot_splits_as_dict
-from FeatureEngineering import BotFeatureExtractor
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
 from config import Config
 from pipeline_utils import apply_time_split_if_enabled
+
+
+def preprocess_split(detector: BotDetector, df: pd.DataFrame) -> pd.DataFrame:
+    """Apply preprocessing to a single data split."""
+    detector.data = df
+    return detector.preprocess()
 
 
 def load_data(data_dir: Path) -> dict:
@@ -86,16 +92,18 @@ def prepare_data(data, config: Config) -> tuple:
         # - Avoids negative "age" features for newer accounts.
         # - With chronological splitting, all accounts already exist at or before
         #   this max-date reference, so this does not leak future labels.
-    train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
-        train_df,
-        val_df,
-        test_df,
-        use_time_split=use_time_split,
-        val_size=config.get('val_size', 0.2),
-        test_size=config.get('test_size', 0.1),
-        time_col='account_creation_date',
-        random_state=config.get('random_state', 2112)
-    )
+        train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
+            train_df,
+            val_df,
+            test_df,
+            use_time_split=True,
+            val_size=config.get('val_size', 0.2),
+            test_size=config.get('test_size', 0.1),
+            time_col='account_creation_date',
+            random_state=config.get('random_state', 2112)
+        )
+    else:
+        reference_date = derive_reference_date(train_df)
     if use_time_split:
         print(f"  Train (oldest):   {len(train_df)} samples")
         print(f"  Val (middle):     {len(val_df)} samples")
@@ -117,14 +125,9 @@ def prepare_data(data, config: Config) -> tuple:
     print("\nPreprocessing...")
     detector = BotDetector()
 
-    detector.data = train_df
-    train_df = detector.preprocess()
-
-    detector.data = val_df
-    val_df = detector.preprocess()
-
-    detector.data = test_df
-    test_df = detector.preprocess()
+    train_df = preprocess_split(detector, train_df)
+    val_df = preprocess_split(detector, val_df)
+    test_df = preprocess_split(detector, test_df)
 
     # Extract features and labels
     feature_names = (
@@ -133,10 +136,15 @@ def prepare_data(data, config: Config) -> tuple:
         .columns
         .tolist()
     )
-    for df in [val_df, test_df]:
-        missing = [col for col in feature_names if col not in df.columns]
-        if missing:
-            df[missing] = 0
+    if not feature_names:
+        raise ValueError("No numeric features found after preprocessing.")
+    missing_val = sorted(set(feature_names) - set(val_df.columns))
+    missing_test = sorted(set(feature_names) - set(test_df.columns))
+    if missing_val or missing_test:
+        raise ValueError(
+            "Feature mismatch detected between train and eval splits. "
+            f"Missing in val: {missing_val}; missing in test: {missing_test}"
+        )
 
     X_train = train_df[feature_names]
     y_train = train_df['label']
@@ -146,9 +154,6 @@ def prepare_data(data, config: Config) -> tuple:
     y_test = test_df['label']
 
     print("\nFinal data shapes (using provided splits):")
-
-    # Reset detector for potential reuse
-    detector = BotDetector()
 
     # Handle imbalance if configured
     if config.get('preprocessing.handle_imbalance'):

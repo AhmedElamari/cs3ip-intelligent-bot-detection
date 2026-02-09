@@ -144,7 +144,11 @@ class ModelBenchmark:
             
             # Get feature importance if available
             feature_importance = None
-            if hasattr(model, 'get_feature_importance') and model.supports_feature_importance:
+            if (
+                hasattr(model, 'get_feature_importance')
+                and hasattr(model, 'supports_feature_importance')
+                and model.supports_feature_importance
+            ):
                 feature_importance = model.get_feature_importance()
             
             # Store results
@@ -222,6 +226,9 @@ class ModelBenchmark:
         Returns:
             Tuple of (model_name, model_instance, metrics)
         """
+        if not self.results:
+            raise ValueError("No benchmark results available. Run run_benchmark() first.")
+
         metric_key = f'{dataset}_metrics'
         
         best_name = None
@@ -282,8 +289,8 @@ class ModelBenchmark:
             try:
                 best_name, _, best_metrics = self.get_best_model(metric)
                 print(f"\nBest by {metric.upper()}: {best_name} ({best_metrics[metric]:.4f})")
-            except:
-                pass
+            except (KeyError, TypeError, ValueError):
+                continue
         
         # Comparison table
         print(f"\n{'-'*70}")
@@ -413,7 +420,7 @@ class ModelBenchmark:
         Args:
             path: Path to save results
         """
-        path = Path(path)
+        path = self._validate_output_path(path)
         path.mkdir(parents=True, exist_ok=True)
         
         # Save comparison table
@@ -439,6 +446,17 @@ class ModelBenchmark:
             json.dump(results_json, f, indent=2, default=str)
         
         print(f"Results saved to {path}")
+
+    @staticmethod
+    def _validate_output_path(path: str) -> Path:
+        """Restrict benchmark output paths to the current workspace."""
+        resolved = Path(path).expanduser().resolve()
+        workspace = Path.cwd().resolve()
+        if resolved != workspace and workspace not in resolved.parents:
+            raise ValueError(
+                f"Path must stay within workspace: {workspace}"
+            )
+        return resolved
     
     def generate_report(self) -> str:
         """

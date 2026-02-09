@@ -15,6 +15,7 @@ from sklearn.metrics import (
 )
 import time
 import pickle
+import warnings
 from pathlib import Path
 
 
@@ -223,7 +224,7 @@ class BaseModel(ABC):
     def save(self, path: str) -> None:
         """Save the model to disk."""
         self._check_fitted()
-        path = Path(path)
+        path = self._validate_output_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(path, 'wb') as f:
@@ -236,8 +237,24 @@ class BaseModel(ABC):
             }, f)
     
     @classmethod
-    def load(cls, path: str) -> 'BaseModel':
-        """Load a model from disk."""
+    def load(cls, path: str, trusted_source: bool = False) -> 'BaseModel':
+        """Load a model from disk.
+
+        Args:
+            path: Pickle file path created by ``save``.
+            trusted_source: Must be True to load. Pickle can execute arbitrary code.
+        """
+        path = cls._validate_output_path(path)
+        if not trusted_source:
+            raise ValueError(
+                "Refusing to load pickle from an untrusted source. "
+                "Pass trusted_source=True only for files you fully trust."
+            )
+        warnings.warn(
+            "Loading a pickled model. Only load artifacts from trusted sources.",
+            UserWarning,
+            stacklevel=2,
+        )
         with open(path, 'rb') as f:
             data = pickle.load(f)
         
@@ -256,6 +273,17 @@ class BaseModel(ABC):
         """Check if the model has been fitted."""
         if not self.is_fitted:
             raise RuntimeError(f"{self.name} has not been fitted. Call fit() first.")
+
+    @staticmethod
+    def _validate_output_path(path: str) -> Path:
+        """Restrict model artifacts to the current workspace."""
+        resolved = Path(path).expanduser().resolve()
+        workspace = Path.cwd().resolve()
+        if resolved != workspace and workspace not in resolved.parents:
+            raise ValueError(
+                f"Path must stay within workspace: {workspace}"
+            )
+        return resolved
     
     def __repr__(self) -> str:
         status = "fitted" if self.is_fitted else "not fitted"
