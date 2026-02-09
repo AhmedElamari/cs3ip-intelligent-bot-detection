@@ -287,16 +287,27 @@ class SHAPExplainer:
         return plt.gcf()
     
     def save_explanations(self, path: str) -> None:
-        """Save SHAP values to disk."""
+        """Save SHAP values to disk as a compressed NPZ archive."""
         if self.shap_values is None:
             raise RuntimeError("No SHAP values to save. Call explain() first.")
         
-        path = Path(path)
+        path = self._validate_output_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
-        import pickle
-        with open(path, 'wb') as f:
-            pickle.dump({
-                'shap_values': self.shap_values,
-                'feature_names': self.feature_names,
-            }, f)
+
+        values = self.shap_values.values if hasattr(self.shap_values, "values") else self.shap_values
+        np.savez_compressed(
+            path,
+            shap_values=np.asarray(values),
+            feature_names=np.asarray(self.feature_names, dtype=object),
+        )
+
+    @staticmethod
+    def _validate_output_path(path: str) -> Path:
+        """Restrict saved explanation paths to the current workspace."""
+        resolved = Path(path).expanduser().resolve()
+        workspace = Path.cwd().resolve()
+        if resolved != workspace and workspace not in resolved.parents:
+            raise ValueError(
+                f"Path must stay within workspace: {workspace}"
+            )
+        return resolved
