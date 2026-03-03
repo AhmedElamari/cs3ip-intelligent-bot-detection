@@ -105,7 +105,7 @@ def run_explainability_analysis(
         )
 
         # Focus SHAP on tree-based models; use LIME for local explanations on others.
-        target_models = ['random_forest', 'gradient_boosting']
+        target_models = ['random_forest', 'xgboost']
 
         for model_name in target_models:
             if model_name not in benchmark.results:

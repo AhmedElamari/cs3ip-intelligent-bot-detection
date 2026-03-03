@@ -72,3 +72,15 @@ def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Conf
 
     config.to_json(output_dir / 'config.json')
     print(f"Saved benchmark report to {output_dir / 'benchmark_report.txt'}")
+
+    ci_df = benchmark.get_confidence_intervals()
+    if not ci_df.empty:
+        ci_path = output_dir / 'metric_confidence_intervals.csv'
+        ci_df.to_csv(ci_path, index=False)
+        print(f"Saved confidence intervals to {ci_path}")
+
+    sig_df = benchmark.get_pairwise_significance()
+    if not sig_df.empty:
+        sig_path = output_dir / 'pairwise_significance.csv'
+        sig_df.to_csv(sig_path, index=False)
+        print(f"Saved pairwise significance to {sig_path}")
