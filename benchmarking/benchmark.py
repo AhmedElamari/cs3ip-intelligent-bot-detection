@@ -51,6 +51,8 @@ class ModelBenchmark:
         self.probabilities: Dict[str, np.ndarray] = {}
         self.y_val: Optional[np.ndarray] = None
         self.y_test: Optional[np.ndarray] = None
+        self.confidence_intervals: Dict[str, Dict[str, Any]] = {}
+        self.pairwise_significance: List[Dict[str, Any]] = []
     
     def add_model(self, name: str, model: Any) -> 'ModelBenchmark':
         """
@@ -171,9 +173,139 @@ class ModelBenchmark:
             print(f"\n{'='*60}")
             print("BENCHMARK COMPLETE")
             print(f"{'='*60}")
-        
+
+        self._compute_statistics(verbose=verbose)
+
         return self.results
-    
+
+    # ------------------------------------------------------------------
+    # Statistical inference
+    # ------------------------------------------------------------------
+
+    def _compute_statistics(
+        self,
+        metrics: Optional[List[str]] = None,
+        n_bootstrap: int = 1000,
+        alpha: float = 0.05,
+        random_state: int = 2112,
+        verbose: bool = False,
+    ) -> None:
+        """
+        Compute per-model bootstrap confidence intervals and pairwise
+        significance tests on the test set, storing results in
+        ``self.confidence_intervals`` and ``self.pairwise_significance``.
+
+        Args:
+            metrics: Metrics to compute CIs for.  Defaults to F1, ROC-AUC,
+                PR-AUC, MCC, and balanced_accuracy.
+            n_bootstrap: Bootstrap resamples.
+            alpha: CI significance level.
+            random_state: Seed for reproducibility.
+            verbose: Print progress.
+        """
+        if self.y_test is None:
+            return
+        if metrics is None:
+            metrics = ['f1', 'roc_auc', 'pr_auc', 'mcc', 'balanced_accuracy']
+
+        if verbose:
+            print("\nComputing bootstrap confidence intervals…")
+
+        calc = self.metrics_calculator
+        model_names = list(self.predictions.keys())
+
+        for name in model_names:
+            y_pred = self.predictions[name]
+            y_proba = self.probabilities.get(name)
+            cis: Dict[str, Any] = {}
+            for m in metrics:
+                lower, point, upper = calc.bootstrap_metric_ci(
+                    self.y_test, y_pred, y_proba,
+                    metric=m,
+                    n_bootstrap=n_bootstrap,
+                    alpha=alpha,
+                    random_state=random_state,
+                )
+                cis[m] = {'lower': lower, 'point': point, 'upper': upper}
+            self.confidence_intervals[name] = cis
+
+        if verbose:
+            print("Computing pairwise significance tests…")
+
+        sig_rows = []
+        for i, name_a in enumerate(model_names):
+            for name_b in model_names[i + 1:]:
+                preds_a = self.predictions[name_a]
+                preds_b = self.predictions[name_b]
+                probas_a = self.probabilities.get(name_a)
+                probas_b = self.probabilities.get(name_b)
+
+                mcnemar_result = calc.mcnemar_test(self.y_test, preds_a, preds_b)
+
+                for m in metrics:
+                    delta_result = calc.bootstrap_delta_ci(
+                        self.y_test, preds_a, preds_b,
+                        probas_a=probas_a, probas_b=probas_b,
+                        metric=m,
+                        n_bootstrap=n_bootstrap,
+                        alpha=alpha,
+                        random_state=random_state,
+                    )
+                    sig_rows.append({
+                        'model_a': name_a,
+                        'model_b': name_b,
+                        'metric': m,
+                        'delta': delta_result['delta'],
+                        'ci_lower': delta_result['ci_lower'],
+                        'ci_upper': delta_result['ci_upper'],
+                        'bootstrap_p': delta_result['p_value'],
+                        'mcnemar_b': mcnemar_result['b'],
+                        'mcnemar_c': mcnemar_result['c'],
+                        'mcnemar_p': mcnemar_result['p_value'],
+                        'mcnemar_type': mcnemar_result['test_type'],
+                    })
+
+        # Apply Holm-Bonferroni correction to bootstrap p-values per metric
+        metrics_seen = list({r['metric'] for r in sig_rows})
+        for m in metrics_seen:
+            subset_idx = [i for i, r in enumerate(sig_rows) if r['metric'] == m]
+            raw_ps = [sig_rows[i]['bootstrap_p'] for i in subset_idx]
+            corrected = calc.holm_bonferroni(raw_ps)
+            for i, idx in enumerate(subset_idx):
+                sig_rows[idx]['bootstrap_p_corrected'] = corrected[i]
+
+        self.pairwise_significance = sig_rows
+
+    def get_confidence_intervals(self, format: str = 'dataframe'):
+        """
+        Return per-model metric confidence intervals.
+
+        Args:
+            format: 'dataframe' returns a tidy DataFrame;
+                    'dict' returns the raw nested dict.
+
+        Returns:
+            DataFrame or dict of CIs.
+        """
+        if format == 'dict':
+            return self.confidence_intervals
+
+        rows = []
+        for model_name, cis in self.confidence_intervals.items():
+            for metric, bounds in cis.items():
+                rows.append({
+                    'model': model_name,
+                    'metric': metric,
+                    'lower': bounds['lower'],
+                    'point': bounds['point'],
+                    'upper': bounds['upper'],
+                })
+        return pd.DataFrame(rows)
+
+    def get_pairwise_significance(self) -> pd.DataFrame:
+        """Return the pairwise model significance table as a DataFrame."""
+        return pd.DataFrame(self.pairwise_significance)
+
     def get_comparison_table(
         self,
         metrics: List[str] = None,
@@ -426,12 +558,21 @@ class ModelBenchmark:
         # Save comparison table
         df = self.get_comparison_table()
         df.to_csv(path / 'comparison.csv', index=False)
-        
+
         # Save feature importance
         fi_df = self.get_feature_importance_comparison()
         if not fi_df.empty:
             fi_df.to_csv(path / 'feature_importance.csv')
-        
+
+        # Save statistical inference results
+        ci_df = self.get_confidence_intervals()
+        if not ci_df.empty:
+            ci_df.to_csv(path / 'metric_confidence_intervals.csv', index=False)
+
+        sig_df = self.get_pairwise_significance()
+        if not sig_df.empty:
+            sig_df.to_csv(path / 'pairwise_significance.csv', index=False)
+
         # Save detailed results as JSON
         results_json = {}
         for name, result in self.results.items():
@@ -440,11 +581,12 @@ class ModelBenchmark:
                 'val_metrics': result['val_metrics'],
                 'test_metrics': result['test_metrics'],
                 'is_interpretable': result['is_interpretable'],
+                'confidence_intervals': self.confidence_intervals.get(name, {}),
             }
-        
+
         with open(path / 'results.json', 'w') as f:
             json.dump(results_json, f, indent=2, default=str)
-        
+
         print(f"Results saved to {path}")
 
     @staticmethod
@@ -496,5 +638,36 @@ class ModelBenchmark:
             lines.append("\n## TOP FEATURES (by average importance)")
             top_features = fi_df.head(10)
             lines.append(top_features.to_string())
-        
+
+        # Bootstrap confidence intervals
+        ci_df = self.get_confidence_intervals()
+        if not ci_df.empty:
+            lines.append("\n## METRIC CONFIDENCE INTERVALS (95%, bootstrap)")
+            lines.append("  Format: point [lower, upper]")
+            for model_name in ci_df['model'].unique():
+                lines.append(f"\n  {model_name}:")
+                subset = ci_df[ci_df['model'] == model_name]
+                for _, row in subset.iterrows():
+                    lines.append(
+                        f"    {row['metric']:20s}: "
+                        f"{row['point']:.4f} [{row['lower']:.4f}, {row['upper']:.4f}]"
+                    )
+
+        # Pairwise significance
+        sig_df = self.get_pairwise_significance()
+        if not sig_df.empty:
+            lines.append("\n## PAIRWISE MODEL SIGNIFICANCE (test set)")
+            lines.append(
+                "  delta = metric_B - metric_A; "
+                "bootstrap_p_corrected: Holm-Bonferroni adjusted p-value; "
+                "mcnemar_p: McNemar exact test on prediction disagreements."
+            )
+            for m in sig_df['metric'].unique():
+                mdf = sig_df[sig_df['metric'] == m][
+                    ['model_a', 'model_b', 'delta', 'ci_lower', 'ci_upper',
+                     'bootstrap_p_corrected', 'mcnemar_p']
+                ]
+                lines.append(f"\n  Metric: {m}")
+                lines.append(mdf.to_string(index=False))
+
         return '\n'.join(lines)

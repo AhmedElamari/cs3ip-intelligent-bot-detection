@@ -87,8 +87,14 @@ def main():
     if args.save_plots or args.explain:
         config.set('output.save_plots', True)
     if args.models:
-        # Disable models not specified
-        for model_name in config.get('models', {}).keys():
+        known_models = set(config.get('models', {}).keys())
+        unknown = [m for m in args.models if m not in known_models]
+        if unknown:
+            raise ValueError(
+                f"Unknown model(s): {unknown}. Available: {sorted(known_models)}\n"
+                "Note: 'gradient_boosting' has been replaced by 'xgboost'."
+            )
+        for model_name in known_models:
             config.set(f'models.{model_name}.enabled', model_name in args.models)
 
     enabled_models = config.get_enabled_models()

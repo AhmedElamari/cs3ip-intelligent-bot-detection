@@ -7,9 +7,11 @@ This project implements an interpretable bot detection pipeline for social media
 - Structured data loading for TwiBot-20 JSON
 - Feature engineering with leakage-aware account age computation
 - Train/validation/test splits with reproducible random state
-- Multiple supervised models with a common interface
-- Benchmarking with comparison tables and plots
-- Explainability using SHAP, LIME, and feature importance analysis
+- Multiple supervised models with a common interface (LR, RF, XGBoost, SVM, DT)
+- Benchmarking with comparison tables, plots, and statistically grounded evaluation
+- Bootstrap 95% confidence intervals per model metric
+- Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
+- Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
 
 ## Project Structure
 ```
@@ -36,13 +38,17 @@ pip install -r requirements.txt
 
 Minimum:
 ```bash
-pip install pandas numpy>=1.23.5,<2.0 scikit-learn>=1.5.0
+pip install pandas numpy>=1.23.5,<2.0 scikit-learn>=1.5.0 xgboost>=2.0.0
 ```
 
 Optional XAI tooling:
 ```bash
 pip install shap lime matplotlib seaborn
 ```
+
+> **Migration note** — the `gradient_boosting` model key was replaced by `xgboost` in the
+> config, CLI, and model registry.  Any existing config files or `--models gradient_boosting`
+> invocations must be updated to use `xgboost`.
 
 ## Usage
 
@@ -69,6 +75,8 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt`
 - `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
+- `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
+- `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
 ### Single Model Pipeline
 ```bash
@@ -76,7 +84,7 @@ python main.py --model random_forest
 ```
 
 Options:
-- `--model`: `random_forest`, `logistic_regression`, `svm`
+- `--model`: `random_forest`, `logistic_regression`, `svm` (XGBoost is available in benchmark only)
 - `--smote`: enable SMOTE
 - `--scale`: enable feature scaling
 - `--features`: select top-k features
@@ -88,7 +96,7 @@ python benchmark.py --explain --save-plots
 
 Options:
 - `--config`: load YAML or JSON config
-- `--models`: specify models to run
+- `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost`)
 - `--smote` / `--scale`: override preprocessing settings
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
