@@ -298,14 +298,14 @@ class SHAPExplainer:
         np.savez_compressed(
             path,
             shap_values=np.asarray(values),
-            feature_names=np.asarray(self.feature_names, dtype=object),
+            feature_names=np.asarray(self.feature_names, dtype=str),
         )
 
     @staticmethod
     def _validate_output_path(path: str) -> Path:
         """Restrict saved explanation paths to the current workspace."""
         resolved = Path(path).expanduser().resolve()
-        workspace = Path.cwd().resolve()
+        workspace = Path(__file__).resolve().parent.parent
         if resolved != workspace and workspace not in resolved.parents:
             raise ValueError(
                 f"Path must stay within workspace: {workspace}"

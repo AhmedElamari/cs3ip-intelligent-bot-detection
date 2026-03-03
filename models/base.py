@@ -278,7 +278,7 @@ class BaseModel(ABC):
     def _validate_output_path(path: str) -> Path:
         """Restrict model artifacts to the current workspace."""
         resolved = Path(path).expanduser().resolve()
-        workspace = Path.cwd().resolve()
+        workspace = Path(__file__).resolve().parent.parent
         if resolved != workspace and workspace not in resolved.parents:
             raise ValueError(
                 f"Path must stay within workspace: {workspace}"
