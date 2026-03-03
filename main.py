@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 from config import Config
 from DataLoader import load_twibot_splits_as_dict
-from FeatureEngineering import BotFeatureExtractor
+from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
 from training import train_and_evaluate
 from pipeline_utils import apply_time_split_if_enabled
@@ -42,6 +42,12 @@ def engineer_features(df: pd.DataFrame, reference_date: pd.Timestamp = None) -> 
     feature_names = extractor.get_feature_names()
     print(f"Extracted {len(feature_names)} features: {feature_names}")
     return df
+
+
+def preprocess_split(detector: BotDetector, df: pd.DataFrame) -> pd.DataFrame:
+    """Apply preprocessing to a single data split."""
+    detector.data = df
+    return detector.preprocess()
 
 
 def run_pipeline(
@@ -98,16 +104,18 @@ def run_pipeline(
         # - Avoids negative "age" features for newer accounts.
         # - With chronological splitting, all accounts already exist at or before
         #   this max-date reference, so this does not leak future labels.
-    train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
-        train_df,
-        val_df,
-        test_df,
-        use_time_split=use_time_split,
-        val_size=val_size,
-        test_size=test_size,
-        time_col='account_creation_date',
-        random_state=random_state
-    )
+        train_df, val_df, test_df, reference_date = apply_time_split_if_enabled(
+            train_df,
+            val_df,
+            test_df,
+            use_time_split=True,
+            val_size=val_size,
+            test_size=test_size,
+            time_col='account_creation_date',
+            random_state=random_state
+        )
+    else:
+        reference_date = derive_reference_date(train_df)
     if use_time_split:
         print(f"  Train (oldest):   {len(train_df)} samples")
         print(f"  Val (middle):     {len(val_df)} samples")
@@ -118,7 +126,6 @@ def run_pipeline(
         print(f"\nReference date for age features: {reference_date.date()}")
 
     # Feature engineering on each split
-    print("\nExtracting features...")
     train_df = engineer_features(train_df, reference_date=reference_date)
     val_df = engineer_features(val_df, reference_date=reference_date)
     test_df = engineer_features(test_df, reference_date=reference_date)
@@ -127,14 +134,9 @@ def run_pipeline(
     print("\nPreprocessing data...")
     detector = BotDetector()
 
-    detector.data = train_df
-    train_df = detector.preprocess()
-
-    detector.data = val_df
-    val_df = detector.preprocess()
-
-    detector.data = test_df
-    test_df = detector.preprocess()
+    train_df = preprocess_split(detector, train_df)
+    val_df = preprocess_split(detector, val_df)
+    test_df = preprocess_split(detector, test_df)
 
     # Extract features
     feature_names = (
@@ -143,15 +145,15 @@ def run_pipeline(
         .columns
         .tolist()
     )
-
-    for df_name, df in (('val', val_df), ('test', test_df)):
-        missing = [col for col in feature_names if col not in df.columns]
-        if missing:
-            df[missing] = 0
-        if df_name == 'val':
-            val_df = df
-        else:
-            test_df = df
+    if not feature_names:
+        raise ValueError("No numeric features found after preprocessing.")
+    missing_val = sorted(set(feature_names) - set(val_df.columns))
+    missing_test = sorted(set(feature_names) - set(test_df.columns))
+    if missing_val or missing_test:
+        raise ValueError(
+            "Feature mismatch detected between train and eval splits. "
+            f"Missing in val: {missing_val}; missing in test: {missing_test}"
+        )
 
     X_train = train_df[feature_names]
     y_train = train_df['label']
