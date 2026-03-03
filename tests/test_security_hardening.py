@@ -71,6 +71,10 @@ class SecurityHardeningTest(unittest.TestCase):
             with np.load(path, allow_pickle=False) as archive:
                 self.assertIn("shap_values", archive.files)
                 self.assertIn("feature_names", archive.files)
+                shap_arr = archive["shap_values"]
+                names_arr = archive["feature_names"]
+                np.testing.assert_array_equal(shap_arr, [[0.2, -0.1], [0.1, 0.3]])
+                self.assertEqual(list(names_arr), ["f1", "f2"])
 
     def test_shap_save_rejects_path_outside_workspace(self):
         explainer = SHAPExplainer(model=object(), feature_names=["f1"])
