@@ -15,10 +15,9 @@ class BotDetector:
     def preprocess(self) -> pd.DataFrame:
         """Clean and preprocess data from TwiBot-20"""
         self.data = self.data.dropna(subset=['label'])
-        # Fill NaN values - use infer_objects() to avoid FutureWarning about downcasting
-        self.data = self.data.fillna(0).infer_objects(copy=False)
-        
-        #normalise the text fields
+        num_cols = self.data.select_dtypes(include='number').columns
+        self.data[num_cols] = self.data[num_cols].fillna(0)
+        self.data = self.data.fillna('')
         if 'description' in self.data.columns:
             self.data['description'] = self.data['description'].str.lower()
         return self.data

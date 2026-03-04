@@ -78,16 +78,16 @@ class Config:
                     'oob_score': True,
                 }
             },
-            'gradient_boosting': {
+            'xgboost': {
                 'enabled': True,
                 'params': {
                     'n_estimators': 100,
                     'learning_rate': 0.1,
                     'max_depth': 5,
-                    'min_samples_split': 2,
-                    'min_samples_leaf': 1,
                     'subsample': 0.8,
-                    'max_features': 'sqrt',
+                    'colsample_bytree': 0.8,
+                    'reg_alpha': 0.0,
+                    'reg_lambda': 1.0,
                     'class_weight': 'balanced',
                 }
             },
@@ -345,13 +345,16 @@ models:
       n_jobs: -1
       oob_score: true
 
-  gradient_boosting:
+  xgboost:
     enabled: true
     params:
       n_estimators: 100
       learning_rate: 0.1
       max_depth: 5
       subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 0.0
+      reg_lambda: 1.0
       class_weight: balanced
 
 explainability:

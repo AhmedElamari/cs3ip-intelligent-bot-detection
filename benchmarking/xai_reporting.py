@@ -21,34 +21,7 @@ def run_explainability_analysis(
     config: Config,
     output_dir: Path
 ) -> dict:
-    """Run XAI analysis on trained models.
-    This function runs different explainability (XAI) analyses, including feature importance,
-    SHAP analysis, and LIME analysis, on trained models in the benchmark pipeline.
-
-    Args:
-        benchmark: The benchmark pipeline object holding trained models and results.
-            is expected to expose ''results'' mapping of model names to 
-            result dictornarites containing atleasta  ''"model"'' key.
-        X_train: Training feature matrix to fit models as Numpy array (N_train x N_features)
-        X_test: Test feature matrix on which explainations are to 
-            be computed. This is expected to be a Numpy array (N_test x N_features)
-        feature_names: List of feature names as strings in column 
-            order of X_train and X_test.
-        config: Configuration object holding explainability settings
-        output_dir: Path to directory where XAI results will be saved
-
-    Returns:
-        Dictionary containing XAI results for each model. 
-        Keys for example, includes 'feature_importance' and 'shap_summary_<model_name>'.
-        For a feature importance key, the value is a pandas DataFrame containing for 
-        each model, the feature names and their importance scores.
-
-        For a SHAP summary key, the value is a matplotlib figure object containing
-        a SHAP summary plot for the model.
-
-        For a LIME explanations key, the value is a dictionary containing the
-        explanations for the test instances.
-    """
+    """Run XAI analysis (feature importance, SHAP, LIME) on trained benchmark models."""
     print("\n" + "=" * 60)
     print("EXPLAINABILITY ANALYSIS (XAI)")
     print("=" * 60)
@@ -82,15 +55,10 @@ def run_explainability_analysis(
             comparison_df = analyzer.compare_importances(importance_comparison)
             xai_results['feature_importance'] = comparison_df
 
-            # Save plot
             if config.get('output.save_plots'):
                 try:
                     fig = analyzer.plot_importance_comparison(comparison_df)
-                    fig.savefig(
-                        output_dir / 'feature_importance_comparison.png',
-                        dpi=150,
-                        bbox_inches='tight'
-                    )
+                    fig.savefig(output_dir / 'feature_importance_comparison.png', dpi=150, bbox_inches='tight')
                     plt.close(fig)
                     print("\nSaved feature importance plot")
                 except Exception as e:
@@ -105,7 +73,7 @@ def run_explainability_analysis(
         )
 
         # Focus SHAP on tree-based models; use LIME for local explanations on others.
-        target_models = ['random_forest', 'gradient_boosting']
+        target_models = ['random_forest', 'xgboost']
 
         for model_name in target_models:
             if model_name not in benchmark.results:
@@ -152,7 +120,7 @@ def run_explainability_analysis(
                             proba = model.predict_proba(instance)[0]
                             confidence = proba[1] if pred == 1 else proba[0]
                             confidence_str = f"{confidence:.1%}"
-                        except Exception:
+                        except Exception:  # predict_proba unavailable or malformed
                             confidence_str = "N/A"
                         print(
                             f"\n  Instance {i+1} - Predicted: {pred_label} "
@@ -178,16 +146,8 @@ def run_explainability_analysis(
                 # Save SHAP summary plot
                 if config.get('output.save_plots'):
                     try:
-                        fig = shap_explainer.plot_summary(
-                            X_test[:min(50, len(X_test))],
-                            max_display=10
-                        )
-                        
-                        fig.savefig(
-                            output_dir / f'shap_summary_{model_name}.png',
-                            dpi=150,
-                            bbox_inches='tight'
-                        )
+                        fig = shap_explainer.plot_summary(X_test[:min(50, len(X_test))], max_display=10)
+                        fig.savefig(output_dir / f'shap_summary_{model_name}.png', dpi=150, bbox_inches='tight')
                         plt.close(fig)
                     except Exception as e:
                         print(f"Could not save SHAP plot: {e}")
