@@ -12,21 +12,14 @@ def _save_plot(fig, output_path: Path) -> None:
 
 
 def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save comparison tables and plots.
-    This function saves the comparison table and plots for the benchmark pipeline.
-
-    Args:
-        benchmark: The benchmark pipeline object holding trained models and results.
-        output_dir: Path to directory where comparison tables and plots will be saved
-        config: Configuration object holding output settings
-    """
+    """Save comparison table and plots for the benchmark pipeline."""
+    # Non-fatal: continue on I/O or table-generation failure so pipeline completes.
     try:
         comparison_df = benchmark.get_comparison_table()
         comparison_df.to_csv(output_dir / 'model_comparison.csv', index=False)
         print(f"\nSaved comparison table to {output_dir / 'model_comparison.csv'}")
     except Exception as e:
         print(f"Warning: Could not save comparison table: {e}")
-        return
 
     if not config.get('output.save_plots'):
         return

@@ -74,6 +74,13 @@ class OutputUtilsTest(unittest.TestCase):
         output = self._run_save(_BenchmarkStub(table_exc=RuntimeError("unexpected")))
         self.assertIn("Warning: Could not save comparison table", output)
 
+    def test_table_failure_does_not_block_plot_saving(self):
+        """When table save fails, plot saving is still attempted when save_plots is enabled."""
+        stub = _BenchmarkStub(table_exc=OSError("disk full"))
+        output = self._run_save(stub, save_plots=True)
+        self.assertIn("Warning: Could not save comparison table", output)
+        self.assertIn("Warning: Could not save plots", output, "Plot saving must run despite table failure")
+
 
 if __name__ == '__main__':
     unittest.main()

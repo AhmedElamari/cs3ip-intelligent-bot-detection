@@ -1,11 +1,4 @@
-"""
-SHAP Explainer
-==============
-SHapley Additive exPlanations for model interpretability.
-
-SHAP values provide consistent and locally accurate attribution
-of predictions to features, based on game theory.
-"""
+"""SHAP (SHapley Additive exPlanations) for model interpretability."""
 
 from typing import Any, Dict, List, Optional, Union
 import numpy as np
@@ -14,28 +7,10 @@ from pathlib import Path
 
 
 class SHAPExplainer:
-    """
-    SHAP-based model explainer for bot detection.
-    
-    SHAP (SHapley Additive exPlanations) uses game theory to
-    explain individual predictions by computing the contribution
-    of each feature.
-    
-    Key concepts:
-        - SHAP value: The contribution of a feature to the prediction
-        - Base value: The average model output
-        - Local explanation: Why a specific sample was classified as it was
-        - Global explanation: Overall feature importance across all samples
-    """
+    """SHAP-based explainer for bot detection models."""
     
     def __init__(self, model, feature_names: List[str] = None):
-        """
-        Initialize SHAP explainer.
-        
-        Args:
-            model: Trained model (can be sklearn model or BaseModel instance)
-            feature_names: List of feature names
-        """
+        """Initialize with trained model and optional feature names."""
         self.model = self._get_underlying_model(model)
         self.feature_names = feature_names
         self.explainer = None
@@ -49,16 +24,7 @@ class SHAPExplainer:
         return model
     
     def fit(self, X: Union[np.ndarray, pd.DataFrame], max_samples: int = 100) -> 'SHAPExplainer':
-        """
-        Fit the SHAP explainer on background data.
-        
-        Args:
-            X: Background data for SHAP explainer
-            max_samples: Maximum samples to use for background
-            
-        Returns:
-            self
-        """
+        """Fit SHAP explainer on background data (up to max_samples)."""
         try:
             import shap
         except ImportError:
