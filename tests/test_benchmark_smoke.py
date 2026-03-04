@@ -123,6 +123,7 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
             feature_names=feature_names, verbose=False,
+            compute_statistics=True,
             statistics_bootstrap_samples=100,
             statistics_metrics=['f1'],
         )
@@ -282,6 +283,136 @@ class XGBoostBenchmarkSmokeTest(unittest.TestCase):
         fi = benchmark.results['xgboost']['feature_importance']
         self.assertIsNotNone(fi)
         self.assertGreater(len(fi), 0)
+
+
+TABNET_AVAILABLE = (
+    importlib.util.find_spec("pytorch_tabnet") is not None
+    and importlib.util.find_spec("torch") is not None
+)
+
+
+@unittest.skipUnless(
+    SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE and TABNET_AVAILABLE,
+    "pytorch-tabnet or core deps not installed"
+)
+class TabNetBenchmarkSmokeTest(unittest.TestCase):
+    """Smoke test for TabNet through the full benchmark pipeline."""
+
+    def test_tabnet_benchmark_produces_results(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=80)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', False)
+        config.set('models.tabnet.enabled', True)
+        # Small params for speed in CI
+        config.set('models.tabnet.params.n_d', 8)
+        config.set('models.tabnet.params.n_a', 8)
+        config.set('models.tabnet.params.n_steps', 1)
+        config.set('models.tabnet.params.max_epochs', 3)
+        config.set('models.tabnet.params.patience', 2)
+        config.set('models.tabnet.params.batch_size', 32)
+        config.set('models.tabnet.params.virtual_batch_size', 8)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+
+        benchmark = ModelBenchmark(models=models, experiment_name='tabnet_smoke')
+        results = benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False,
+        )
+
+        self.assertIn('tabnet', results)
+        result = results['tabnet']
+        self.assertIn('f1', result['val_metrics'])
+        self.assertIn('f1', result['test_metrics'])
+        # predict_proba path → roc_auc should be present
+        self.assertIn('roc_auc', result['test_metrics'])
+
+    def test_tabnet_feature_importance_present(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=80)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', False)
+        config.set('models.tabnet.enabled', True)
+        config.set('models.tabnet.params.n_d', 8)
+        config.set('models.tabnet.params.n_a', 8)
+        config.set('models.tabnet.params.n_steps', 1)
+        config.set('models.tabnet.params.max_epochs', 3)
+        config.set('models.tabnet.params.patience', 2)
+        config.set('models.tabnet.params.batch_size', 32)
+        config.set('models.tabnet.params.virtual_batch_size', 8)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+
+        benchmark = ModelBenchmark(models=models, experiment_name='tabnet_fi')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False,
+        )
+
+        fi = benchmark.results['tabnet']['feature_importance']
+        self.assertIsNotNone(fi)
+        self.assertGreater(len(fi), 0)
+
+
+@unittest.skipUnless(
+    SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE and TABNET_AVAILABLE,
+    "pytorch-tabnet or core deps not installed"
+)
+class TabNetStatisticsSmokeTest(unittest.TestCase):
+    """Verify CIs and pairwise significance work when TabNet is in the comparison set."""
+
+    def test_tabnet_lr_statistics_populated(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=100)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name in ('logistic_regression', 'tabnet'))
+        config.set('preprocessing.scale_features', True)
+        config.set('models.tabnet.params.n_d', 8)
+        config.set('models.tabnet.params.n_a', 8)
+        config.set('models.tabnet.params.n_steps', 1)
+        config.set('models.tabnet.params.max_epochs', 3)
+        config.set('models.tabnet.params.patience', 2)
+        config.set('models.tabnet.params.batch_size', 32)
+        config.set('models.tabnet.params.virtual_batch_size', 8)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+
+        benchmark = ModelBenchmark(models=models, experiment_name='tabnet_stats_smoke')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=True,
+            statistics_bootstrap_samples=50,
+            statistics_metrics=['f1'],
+        )
+
+        ci_df = benchmark.get_confidence_intervals()
+        self.assertFalse(ci_df.empty, "CIs must not be empty when TabNet included.")
+        self.assertIn('tabnet', ci_df['model'].values)
+
+        sig_df = benchmark.get_pairwise_significance()
+        self.assertFalse(sig_df.empty, "Pairwise significance must not be empty.")
 
 
 if __name__ == '__main__':

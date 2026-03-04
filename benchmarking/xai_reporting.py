@@ -72,8 +72,8 @@ def run_explainability_analysis(
             "negative toward Human (class 0)."
         )
 
-        # Focus SHAP on tree-based models; use LIME for local explanations on others.
-        target_models = ['random_forest', 'xgboost']
+        # SHAP for tree-based models + TabNet (uses model-agnostic KernelExplainer path).
+        target_models = ['random_forest', 'xgboost', 'tabnet']
 
         for model_name in target_models:
             if model_name not in benchmark.results:

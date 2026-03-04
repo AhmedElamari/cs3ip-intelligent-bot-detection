@@ -75,6 +75,10 @@ class ModelBenchmark:
                 print(f"Training: {name}")
                 print(f"{'-'*40}")
             
+            # Register validation data for early stopping (TabNet and future models)
+            if hasattr(model, 'prepare_eval_set'):
+                model.prepare_eval_set(X_val, y_val)
+
             # Train model
             start_time = time.time()
             model.fit(X_train, y_train, feature_names=feature_names)
