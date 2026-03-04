@@ -38,37 +38,41 @@ class _BenchmarkStub:
 
 class OutputUtilsTest(unittest.TestCase):
 
-    def test_save_comparison_outputs_warns_when_plot_raises_keyerror(self):
+    def _run_save(self, stub, save_plots=True):
         with TemporaryDirectory() as tmp:
-            output_dir = Path(tmp)
             config = Config()
-            config.set('output.save_plots', True)
+            config.set('output.save_plots', save_plots)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                save_comparison_outputs(stub, Path(tmp), config)
+        return out.getvalue()
 
-            stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                save_comparison_outputs(
-                    _BenchmarkStub(plot_exc=KeyError("model_a")),
-                    output_dir,
-                    config,
-                )
+    def test_warns_when_plot_raises_keyerror(self):
+        output = self._run_save(_BenchmarkStub(plot_exc=KeyError("model_a")))
+        self.assertIn("Warning: Could not save plots", output)
 
-        self.assertIn("Warning: Could not save plots", stdout.getvalue())
+    def test_warns_when_table_raises_keyerror(self):
+        output = self._run_save(_BenchmarkStub(table_exc=KeyError("test_metrics")))
+        self.assertIn("Warning: Could not save comparison table", output)
 
-    def test_save_comparison_outputs_warns_when_table_generation_raises_keyerror(self):
-        with TemporaryDirectory() as tmp:
-            output_dir = Path(tmp)
-            config = Config()
-            config.set('output.save_plots', True)
+    def test_warns_when_plot_raises_attribute_error(self):
+        """AttributeError (e.g. None returned as fig) must be caught non-fatally."""
+        output = self._run_save(_BenchmarkStub(plot_exc=AttributeError("'NoneType' has no savefig")))
+        self.assertIn("Warning: Could not save plots", output)
 
-            stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                save_comparison_outputs(
-                    _BenchmarkStub(table_exc=KeyError("test_metrics")),
-                    output_dir,
-                    config,
-                )
+    def test_warns_when_plot_raises_import_error(self):
+        """ImportError from misconfigured matplotlib backend must be caught."""
+        output = self._run_save(_BenchmarkStub(plot_exc=ImportError("No backend")))
+        self.assertIn("Warning: Could not save plots", output)
 
-        self.assertIn("Warning: Could not save comparison table", stdout.getvalue())
+    def test_warns_when_table_raises_type_error(self):
+        """TypeError from malformed DataFrame must be caught non-fatally."""
+        output = self._run_save(_BenchmarkStub(table_exc=TypeError("unhashable")))
+        self.assertIn("Warning: Could not save comparison table", output)
+
+    def test_warns_when_table_raises_runtime_error(self):
+        output = self._run_save(_BenchmarkStub(table_exc=RuntimeError("unexpected")))
+        self.assertIn("Warning: Could not save comparison table", output)
 
 
 if __name__ == '__main__':

@@ -288,6 +288,48 @@ class HolmBonferroniTest(unittest.TestCase):
         for p in corrected:
             self.assertLessEqual(p, 1.0)
 
+    def test_nan_excluded_from_multiplicity(self):
+        """NaN should not inflate corrections; finite entries corrected over m=2."""
+        import math
+        raw = [0.01, 0.04, float('nan')]
+        corrected = self.calc.holm_bonferroni(raw)
+        self.assertEqual(len(corrected), 3)
+        self.assertTrue(math.isnan(corrected[2]))
+        # With only 2 finite hypotheses, smallest adjusted = 2*0.01 = 0.02
+        self.assertAlmostEqual(min(c for c in corrected if not math.isnan(c)), 0.02, places=10)
+
+    def test_all_nan_returns_all_nan(self):
+        import math
+        raw = [float('nan'), float('nan')]
+        corrected = self.calc.holm_bonferroni(raw)
+        self.assertEqual(len(corrected), 2)
+        self.assertTrue(all(math.isnan(c) for c in corrected))
+
+    def test_nonfinite_inputs_produce_valid_finite_range(self):
+        """Positions with inf/-inf become NaN; finite positions stay in [0, 1]."""
+        import math
+        raw = [0.01, float('-inf'), float('inf'), float('nan'), 0.04]
+        corrected = self.calc.holm_bonferroni(raw)
+        self.assertEqual(len(corrected), 5)
+        finite_corrected = [c for c in corrected if not math.isnan(c)]
+        for c in finite_corrected:
+            self.assertGreaterEqual(c, 0.0)
+            self.assertLessEqual(c, 1.0)
+        # Positions 1, 2, 3 (non-finite input) must be NaN in output
+        self.assertTrue(math.isnan(corrected[1]))
+        self.assertTrue(math.isnan(corrected[2]))
+        self.assertTrue(math.isnan(corrected[3]))
+
+    def test_finite_path_unchanged(self):
+        """Pure finite vector must match expected Holm behaviour."""
+        import math
+        raw = [0.01, 0.04, 0.03]
+        corrected = self.calc.holm_bonferroni(raw)
+        # All 3 are finite
+        self.assertTrue(all(not math.isnan(c) for c in corrected))
+        # Smallest raw (0.01 at index 0) gets multiplied by 3 -> 0.03
+        self.assertAlmostEqual(corrected[0], 0.03, places=10)
+
 
 if __name__ == '__main__':
     unittest.main()
