@@ -53,6 +53,25 @@ class MetricsCalculator:
             class_names: Names for classes ['Human', 'Bot']
         """
         self.class_names = class_names or ['Human', 'Bot']
+
+    @staticmethod
+    def _positive_class_proba(y_proba: np.ndarray) -> np.ndarray:
+        """Return 1-D probabilities for the positive class."""
+        proba = np.asarray(y_proba)
+        return proba[:, 1] if proba.ndim > 1 else proba
+
+    @staticmethod
+    def _valid_bootstrap_samples(
+        rng: np.random.RandomState,
+        n: int,
+        n_bootstrap: int,
+        y_true: np.ndarray,
+    ):
+        """Yield bootstrap indices where both classes appear in the resample."""
+        for _ in range(n_bootstrap):
+            idx = rng.randint(0, n, n)
+            if len(np.unique(y_true[idx])) >= 2:
+                yield idx
     
     def compute_all_metrics(
         self,
@@ -92,7 +111,7 @@ class MetricsCalculator:
         
         # Probability-based metrics
         if y_proba is not None:
-            proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+            proba = self._positive_class_proba(y_proba)
             try:
                 metrics['roc_auc'] = roc_auc_score(y_true, proba)
             except ValueError:
@@ -194,7 +213,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with fpr, tpr, thresholds
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         fpr, tpr, thresholds = roc_curve(y_true, proba)
         return {
             'fpr': fpr,
@@ -217,7 +236,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with precision, recall, thresholds
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         precision, recall, thresholds = precision_recall_curve(y_true, proba)
         return {
             'precision': precision,
@@ -242,7 +261,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with optimal threshold and metric value
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         
         best_threshold = 0.5
         best_score = 0
@@ -331,7 +350,7 @@ class MetricsCalculator:
         import matplotlib.pyplot as plt
         
         roc_data = self.get_roc_curve(y_true, y_proba)
-        auc = roc_auc_score(y_true, y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba)
+        auc = roc_auc_score(y_true, self._positive_class_proba(y_proba))
         
         fig, ax = plt.subplots(figsize=figsize)
         ax.plot(roc_data['fpr'], roc_data['tpr'], 'b-', label=f'ROC (AUC = {auc:.3f})')
@@ -365,7 +384,7 @@ class MetricsCalculator:
         import matplotlib.pyplot as plt
         
         pr_data = self.get_precision_recall_curve(y_true, y_proba)
-        auc = average_precision_score(y_true, y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba)
+        auc = average_precision_score(y_true, self._positive_class_proba(y_proba))
         
         fig, ax = plt.subplots(figsize=figsize)
         ax.plot(pr_data['recall'], pr_data['precision'], 'b-', label=f'PR (AUC = {auc:.3f})')
@@ -410,34 +429,28 @@ class MetricsCalculator:
         metric: str,
     ) -> float:
         """Compute a single named metric on provided arrays."""
-        if metric == 'accuracy':
-            return accuracy_score(y_true, y_pred)
-        if metric == 'precision':
-            return precision_score(y_true, y_pred, average='binary', zero_division=0)
-        if metric == 'recall':
-            return recall_score(y_true, y_pred, average='binary', zero_division=0)
-        if metric == 'f1':
-            return f1_score(y_true, y_pred, average='binary', zero_division=0)
-        if metric == 'balanced_accuracy':
-            return balanced_accuracy_score(y_true, y_pred)
-        if metric == 'mcc':
-            return matthews_corrcoef(y_true, y_pred)
-        if metric == 'roc_auc':
+        basic_metric_fns = {
+            'accuracy': accuracy_score,
+            'precision': lambda yt, yp: precision_score(yt, yp, average='binary', zero_division=0),
+            'recall': lambda yt, yp: recall_score(yt, yp, average='binary', zero_division=0),
+            'f1': lambda yt, yp: f1_score(yt, yp, average='binary', zero_division=0),
+            'balanced_accuracy': balanced_accuracy_score,
+            'mcc': matthews_corrcoef,
+        }
+        metric_fn = basic_metric_fns.get(metric)
+        if metric_fn is not None:
+            return metric_fn(y_true, y_pred)
+
+        if metric in ('roc_auc', 'pr_auc'):
             if y_proba is None:
                 return float('nan')
-            proba = y_proba[:, 1] if y_proba.ndim > 1 else y_proba
+            proba = self._positive_class_proba(y_proba)
+            scorer = roc_auc_score if metric == 'roc_auc' else average_precision_score
             try:
-                return roc_auc_score(y_true, proba)
+                return scorer(y_true, proba)
             except ValueError:
                 return float('nan')
-        if metric == 'pr_auc':
-            if y_proba is None:
-                return float('nan')
-            proba = y_proba[:, 1] if y_proba.ndim > 1 else y_proba
-            try:
-                return average_precision_score(y_true, proba)
-            except ValueError:
-                return float('nan')
+
         raise ValueError(f"Unsupported metric for bootstrapping: {metric}")
 
     def bootstrap_metric_ci(
@@ -475,13 +488,9 @@ class MetricsCalculator:
         point = self._compute_metric(y_true, y_pred, y_proba, metric)
 
         boot_scores = []
-        for _ in range(n_bootstrap):
-            idx = rng.randint(0, n, n)
-            bt = y_true[idx]
-            bp = y_pred[idx]
+        for idx in self._valid_bootstrap_samples(rng, n, n_bootstrap, y_true):
+            bt, bp = y_true[idx], y_pred[idx]
             bpr = y_proba[idx] if y_proba is not None else None
-            if len(np.unique(bt)) < 2:
-                continue
             score = self._compute_metric(bt, bp, bpr, metric)
             if not np.isnan(score):
                 boot_scores.append(score)
@@ -538,17 +547,12 @@ class MetricsCalculator:
         observed_delta = score_b - score_a
 
         boot_deltas = []
-        for _ in range(n_bootstrap):
-            idx = rng.randint(0, n, n)
+        for idx in self._valid_bootstrap_samples(rng, n, n_bootstrap, y_true):
             bt = y_true[idx]
-            if len(np.unique(bt)) < 2:
-                continue
-            bpa = preds_a[idx]
-            bpb = preds_b[idx]
             bpra = probas_a[idx] if probas_a is not None else None
             bprb = probas_b[idx] if probas_b is not None else None
-            sa = self._compute_metric(bt, bpa, bpra, metric)
-            sb = self._compute_metric(bt, bpb, bprb, metric)
+            sa = self._compute_metric(bt, preds_a[idx], bpra, metric)
+            sb = self._compute_metric(bt, preds_b[idx], bprb, metric)
             if not (np.isnan(sa) or np.isnan(sb)):
                 boot_deltas.append(sb - sa)
 
@@ -559,9 +563,11 @@ class MetricsCalculator:
         boot_deltas = np.array(boot_deltas)
         ci_lower = float(np.percentile(boot_deltas, 100 * alpha / 2))
         ci_upper = float(np.percentile(boot_deltas, 100 * (1 - alpha / 2)))
-        # Two-sided p-value: proportion of bootstrap deltas on the opposite side
-        p_value = float(np.mean(np.abs(boot_deltas - boot_deltas.mean()) >=
-                                abs(observed_delta - boot_deltas.mean())))
+        # Two-sided p-value under null H0: delta == 0 (null-centered, not mean-centered).
+        # This avoids non-informative p-values when observed_delta is close to boot mean.
+        p_left = float(np.mean(boot_deltas <= 0.0))
+        p_right = float(np.mean(boot_deltas >= 0.0))
+        p_value = float(min(1.0, 2.0 * min(p_left, p_right)))
         return {
             'delta': observed_delta,
             'ci_lower': ci_lower,
@@ -592,8 +598,6 @@ class MetricsCalculator:
             Dict with keys: b (A-right B-wrong), c (A-wrong B-right),
             statistic, p_value, test_type.
         """
-        from scipy.stats import binom, chi2
-
         y_true = np.asarray(y_true)
         preds_a = np.asarray(preds_a)
         preds_b = np.asarray(preds_b)
@@ -608,12 +612,23 @@ class MetricsCalculator:
             return {'b': b, 'c': c, 'statistic': 0.0, 'p_value': 1.0,
                     'test_type': 'exact'}
 
+        try:
+            from scipy.stats import binom, chi2
+        except ImportError:
+            return {
+                'b': b,
+                'c': c,
+                'statistic': float('nan'),
+                'p_value': float('nan'),
+                'test_type': 'unavailable',
+            }
+
         if b + c < 25:
             # Exact binomial two-sided
-            p_value = float(2 * min(
+            p_value = float(min(1.0, 2 * min(
                 binom.cdf(min(b, c), b + c, 0.5),
                 1 - binom.cdf(min(b, c) - 1, b + c, 0.5),
-            ))
+            )))
             statistic = float(min(b, c))
             test_type = 'exact'
         else:

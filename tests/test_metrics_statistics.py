@@ -202,6 +202,44 @@ class McNemarTest(unittest.TestCase):
         self.assertGreaterEqual(result['p_value'], 0.0)
         self.assertLessEqual(result['p_value'], 1.0)
 
+    def test_exact_branch_p_value_capped_at_one(self):
+        import numpy as np
+        # Build b=1, c=1 to exercise exact branch where 2*min(...) may exceed 1.
+        y_true = np.array([1, 1, 0, 0])
+        preds_a = np.array([1, 0, 0, 0])  # wrong once
+        preds_b = np.array([0, 1, 0, 0])  # wrong once, different position
+        result = self.calc.mcnemar_test(y_true, preds_a, preds_b)
+        self.assertEqual(result['test_type'], 'exact')
+        self.assertLessEqual(result['p_value'], 1.0)
+
+
+class McNemarDependencyBehaviorTest(unittest.TestCase):
+    def setUp(self):
+        if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE):
+            self.skipTest("Required dependencies not installed")
+        from benchmarking.metrics import MetricsCalculator
+        self.calc = MetricsCalculator()
+
+    def test_missing_scipy_graceful_unavailable(self):
+        """Deterministic proof: mcnemar_test falls back gracefully when scipy import is blocked.
+
+        Uses sys.modules patching so this test runs regardless of whether scipy is
+        installed in the current environment.
+        """
+        import sys
+        import numpy as np
+        from unittest.mock import patch
+
+        y_true = np.array([0, 1, 0, 1])
+        preds_a = np.array([0, 1, 1, 0])
+        preds_b = np.array([0, 0, 1, 1])
+
+        with patch.dict(sys.modules, {'scipy': None, 'scipy.stats': None}):
+            result = self.calc.mcnemar_test(y_true, preds_a, preds_b)
+
+        self.assertTrue(np.isnan(result['p_value']))
+        self.assertEqual(result['test_type'], 'unavailable')
+
 
 class HolmBonferroniTest(unittest.TestCase):
 
