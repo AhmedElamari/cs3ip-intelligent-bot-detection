@@ -644,22 +644,33 @@ class MetricsCalculator:
         """
         Apply Holm-Bonferroni step-down correction to a list of p-values.
 
+        Non-finite inputs (NaN, +/-inf) are excluded from the multiplicity
+        count and returned as NaN so they do not inflate corrections on
+        valid hypotheses.
+
         Args:
-            p_values: Uncorrected p-values.
+            p_values: Uncorrected p-values (may contain NaN or inf).
 
         Returns:
-            Corrected p-values (same order as input).
+            Corrected p-values in the same order as input; non-finite
+            positions are set to NaN.
         """
-        n = len(p_values)
-        if n == 0:
+        arr = np.asarray(p_values, dtype=float)
+        if arr.size == 0:
             return []
-        order = np.argsort(p_values)
-        sorted_p = np.array(p_values)[order]
-        # Multiply by (n, n-1, …, 1) then take cumulative max to enforce
-        # monotonicity of adjusted p-values (standard Holm step-down rule).
-        corrected = np.maximum.accumulate(
-            sorted_p * np.arange(n, 0, -1)
-        ).clip(max=1.0)
-        result = np.empty(n)
-        result[order] = corrected
-        return result.tolist()
+
+        out = np.full(arr.size, np.nan)
+        finite_mask = np.isfinite(arr)
+        if not np.any(finite_mask):
+            return out.tolist()
+
+        finite_idx = np.where(finite_mask)[0]
+        p = np.clip(arr[finite_mask], 0.0, 1.0)
+        m = p.size
+
+        order = np.argsort(p, kind='mergesort')
+        # Multiply by (m, m-1, …, 1) then take cumulative max to enforce
+        # monotonicity, then clip to [0, 1] (standard Holm step-down rule).
+        adjusted = np.minimum(1.0, np.maximum.accumulate(p[order] * np.arange(m, 0, -1)))
+        out[finite_idx[order]] = adjusted
+        return out.tolist()
