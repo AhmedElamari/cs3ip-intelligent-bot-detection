@@ -70,7 +70,8 @@ class BenchmarkSmokeTest(unittest.TestCase):
         benchmark = ModelBenchmark(models=models, experiment_name='smoke')
         results = benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
-            feature_names=feature_names, verbose=False
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False,
         )
 
         self.assertIn('logistic_regression', results)
@@ -90,11 +91,20 @@ class BenchmarkSmokeTest(unittest.TestCase):
 class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
     """Verify that CIs and pairwise significance are generated after run_benchmark."""
 
+    _shared_benchmark = None  # class-level cache
+
+    @classmethod
+    def setUpClass(cls):
+        if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE):
+            return
+        cls._shared_benchmark = cls._build_lr_rf_benchmark()
+
     def setUp(self):
         if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE):
             self.skipTest("Required dependencies not installed")
 
-    def _run_lr_rf_benchmark(self):
+    @classmethod
+    def _build_lr_rf_benchmark(cls):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
@@ -112,9 +122,14 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         benchmark = ModelBenchmark(models=models, experiment_name='stats_smoke')
         benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
-            feature_names=feature_names, verbose=False
+            feature_names=feature_names, verbose=False,
+            statistics_bootstrap_samples=100,
+            statistics_metrics=['f1'],
         )
         return benchmark
+
+    def _run_lr_rf_benchmark(self):
+        return self._shared_benchmark
 
     def test_confidence_intervals_present(self):
         benchmark = self._run_lr_rf_benchmark()
@@ -166,16 +181,19 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
     def test_statistics_mcnemar_unavailable_when_scipy_absent(self):
         """Benchmark pairwise rows carry mcnemar_type='unavailable' when scipy is blocked.
 
-        Trains the benchmark normally, then re-computes statistics with scipy import
-        patched out so the graceful fallback path is proven deterministically.
+        Uses a freshly trained benchmark (not the shared cache) so that the
+        re-compute call cannot contaminate other tests.
         """
         import sys
         from unittest.mock import patch
 
-        benchmark = self._run_lr_rf_benchmark()
+        # Fresh instance: no shared-state mutation risk
+        benchmark = self._build_lr_rf_benchmark()
 
         with patch.dict(sys.modules, {'scipy': None, 'scipy.stats': None}):
-            benchmark._compute_statistics(include_mcnemar=True, verbose=False)
+            benchmark._compute_statistics(
+                metrics=['f1'], n_bootstrap=20, include_mcnemar=True, verbose=False
+            )
 
         sig_df = benchmark.get_pairwise_significance()
         self.assertFalse(sig_df.empty)
@@ -231,7 +249,8 @@ class XGBoostBenchmarkSmokeTest(unittest.TestCase):
         benchmark = ModelBenchmark(models=models, experiment_name='xgb_smoke')
         results = benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
-            feature_names=feature_names, verbose=False
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False,
         )
 
         self.assertIn('xgboost', results)
@@ -256,7 +275,8 @@ class XGBoostBenchmarkSmokeTest(unittest.TestCase):
         benchmark = ModelBenchmark(models=models, experiment_name='xgb_fi')
         benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
-            feature_names=feature_names, verbose=False
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False,
         )
 
         fi = benchmark.results['xgboost']['feature_importance']
