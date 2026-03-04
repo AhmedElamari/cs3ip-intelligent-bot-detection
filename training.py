@@ -9,7 +9,7 @@ labels (0/1), fits the requested model, and prints standard evaluation output.
 """
 
 import numpy as np
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
@@ -38,7 +38,8 @@ def train_and_evaluate(
     y_val: np.ndarray,
     y_test: np.ndarray,
     model_type: str = 'random_forest',
-    class_weights: Optional[Dict[int, float]] = None
+    class_weights: Optional[Dict[int, float]] = None,
+    feature_names: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Train a model and evaluate on validation and test sets.
@@ -50,13 +51,14 @@ def train_and_evaluate(
         y_train: Training labels.
         y_val: Validation labels.
         y_test: Test labels.
-        model_type: Model identifier ('random_forest', 'logistic_regression', 'svm').
+        model_type: Model identifier ('random_forest', 'logistic_regression', 'svm', 'tabnet').
         class_weights: Optional class weight mapping for imbalance handling.
 
     Returns:
         Dictionary with the fitted model plus validation and test metrics.
     """
     _validate_binary_labels(y_train, y_val, y_test)
+
     if model_type == 'random_forest':
         model = RandomForestClassifier(
             n_estimators=100,
@@ -77,11 +79,30 @@ def train_and_evaluate(
             random_state=2112,
             kernel='rbf'
         )
+    elif model_type == 'tabnet':
+        from models.tabnet import TabNetModel
+        from benchmarking.tabnet_prep import TabNetPrep
+
+        prep = TabNetPrep()
+        X_train, meta = prep.fit_transform(X_train)
+        X_val = prep.transform(X_val)
+        X_test = prep.transform(X_test)
+
+        model = TabNetModel(
+            random_state=2112,
+            class_weight=class_weights if class_weights else 'balanced',
+            cat_idxs=meta.cat_idxs,
+            cat_dims=meta.cat_dims,
+        )
+        model.prepare_eval_set(X_val, y_val)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
     print(f"\nTraining {model_type}...")
-    model.fit(X_train, y_train)
+    if model_type == 'tabnet':
+        model.fit(X_train, y_train, feature_names=feature_names or meta.feature_names)
+    else:
+        model.fit(X_train, y_train)
 
     y_val_pred = model.predict(X_val)
     val_metrics = {
