@@ -70,6 +70,22 @@ def main():
         action='store_true',
         help='Scale features'
     )
+    parser.add_argument(
+        '--skip-statistics',
+        action='store_true',
+        help='Skip bootstrap confidence intervals and pairwise significance tests'
+    )
+    parser.add_argument(
+        '--statistics-bootstrap-samples',
+        type=int,
+        default=1000,
+        help='Bootstrap resamples for inferential statistics (default: 1000)'
+    )
+    parser.add_argument(
+        '--skip-mcnemar',
+        action='store_true',
+        help='Skip McNemar paired test in pairwise significance output'
+    )
     args = parser.parse_args()
     
     # Load configuration
@@ -90,7 +106,7 @@ def main():
         known_models = set(config.get('models', {}).keys())
         unknown = [m for m in args.models if m not in known_models]
         if unknown:
-            raise ValueError(
+            parser.error(
                 f"Unknown model(s): {unknown}. Available: {sorted(known_models)}\n"
                 "Note: 'gradient_boosting' has been replaced by 'xgboost'."
             )
@@ -140,7 +156,10 @@ def main():
         X_val, y_val,
         X_test, y_test,
         feature_names=feature_names,
-        verbose=True
+        verbose=True,
+        compute_statistics=not args.skip_statistics,
+        statistics_bootstrap_samples=args.statistics_bootstrap_samples,
+        include_mcnemar=not args.skip_mcnemar,
     )
     
     # Print summary

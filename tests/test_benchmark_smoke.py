@@ -10,6 +10,7 @@ SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
 NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
 PANDAS_AVAILABLE = importlib.util.find_spec("pandas") is not None
 XGBOOST_AVAILABLE = importlib.util.find_spec("xgboost") is not None
+SCIPY_AVAILABLE = importlib.util.find_spec("scipy") is not None
 
 
 def _make_synthetic_splits(n_samples=40):
@@ -61,6 +62,7 @@ class BenchmarkSmokeTest(unittest.TestCase):
         config = Config()
         for model_name in config.get('models', {}).keys():
             config.set(f'models.{model_name}.enabled', model_name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
 
         X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
         models = create_models(config)
@@ -102,6 +104,7 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         config = Config()
         for name in config.get('models', {}).keys():
             config.set(f'models.{name}.enabled', name in ('logistic_regression', 'random_forest'))
+        config.set('preprocessing.scale_features', True)
 
         X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
         models = create_models(config)
@@ -139,6 +142,8 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         self.assertFalse(sig_df.empty, "Pairwise significance DataFrame must not be empty.")
         for col in ('model_a', 'model_b', 'metric', 'delta', 'bootstrap_p', 'mcnemar_p'):
             self.assertIn(col, sig_df.columns)
+        if not SCIPY_AVAILABLE:
+            self.assertTrue((sig_df['mcnemar_type'] == 'unavailable').all())
 
     def test_holm_corrected_column_present(self):
         benchmark = self._run_lr_rf_benchmark()
@@ -157,6 +162,47 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         report = benchmark.generate_report()
         self.assertIn('CONFIDENCE INTERVALS', report)
         self.assertIn('PAIRWISE MODEL SIGNIFICANCE', report)
+
+    def test_statistics_mcnemar_unavailable_when_scipy_absent(self):
+        """Benchmark pairwise rows carry mcnemar_type='unavailable' when scipy is blocked.
+
+        Trains the benchmark normally, then re-computes statistics with scipy import
+        patched out so the graceful fallback path is proven deterministically.
+        """
+        import sys
+        from unittest.mock import patch
+
+        benchmark = self._run_lr_rf_benchmark()
+
+        with patch.dict(sys.modules, {'scipy': None, 'scipy.stats': None}):
+            benchmark._compute_statistics(include_mcnemar=True, verbose=False)
+
+        sig_df = benchmark.get_pairwise_significance()
+        self.assertFalse(sig_df.empty)
+        self.assertTrue((sig_df['mcnemar_type'] == 'unavailable').all())
+
+    def test_statistics_can_be_skipped(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name in ('logistic_regression', 'random_forest'))
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+
+        benchmark = ModelBenchmark(models=models, experiment_name='stats_skip_smoke')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False, compute_statistics=False
+        )
+        self.assertTrue(benchmark.get_confidence_intervals().empty)
+        self.assertTrue(benchmark.get_pairwise_significance().empty)
 
 
 class XGBoostBenchmarkSmokeTest(unittest.TestCase):

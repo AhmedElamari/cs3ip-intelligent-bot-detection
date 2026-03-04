@@ -77,7 +77,13 @@ class ModelBenchmark:
         X_test: np.ndarray,
         y_test: np.ndarray,
         feature_names: List[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        compute_statistics: bool = True,
+        statistics_metrics: Optional[List[str]] = None,
+        statistics_bootstrap_samples: int = 1000,
+        statistics_alpha: float = 0.05,
+        statistics_random_state: int = 2112,
+        include_mcnemar: bool = True,
     ) -> Dict[str, Dict[str, Any]]:
         """
         Run benchmark on all models.
@@ -91,6 +97,12 @@ class ModelBenchmark:
             y_test: Test labels
             feature_names: Feature names
             verbose: Print progress
+            compute_statistics: Whether to compute CIs/significance tests.
+            statistics_metrics: Metrics to compute inferential stats for.
+            statistics_bootstrap_samples: Number of bootstrap resamples.
+            statistics_alpha: Significance level for confidence intervals.
+            statistics_random_state: RNG seed for bootstrap reproducibility.
+            include_mcnemar: Whether to include McNemar test in pairwise stats.
             
         Returns:
             Dictionary of results for each model
@@ -174,7 +186,18 @@ class ModelBenchmark:
             print("BENCHMARK COMPLETE")
             print(f"{'='*60}")
 
-        self._compute_statistics(verbose=verbose)
+        if compute_statistics:
+            self._compute_statistics(
+                metrics=statistics_metrics,
+                n_bootstrap=statistics_bootstrap_samples,
+                alpha=statistics_alpha,
+                random_state=statistics_random_state,
+                include_mcnemar=include_mcnemar,
+                verbose=verbose,
+            )
+        else:
+            self.confidence_intervals = {}
+            self.pairwise_significance = []
 
         return self.results
 
@@ -188,6 +211,7 @@ class ModelBenchmark:
         n_bootstrap: int = 1000,
         alpha: float = 0.05,
         random_state: int = 2112,
+        include_mcnemar: bool = True,
         verbose: bool = False,
     ) -> None:
         """
@@ -201,6 +225,7 @@ class ModelBenchmark:
             n_bootstrap: Bootstrap resamples.
             alpha: CI significance level.
             random_state: Seed for reproducibility.
+            include_mcnemar: Whether to run McNemar paired test.
             verbose: Print progress.
         """
         if self.y_test is None:
@@ -240,7 +265,14 @@ class ModelBenchmark:
                 probas_a = self.probabilities.get(name_a)
                 probas_b = self.probabilities.get(name_b)
 
-                mcnemar_result = calc.mcnemar_test(self.y_test, preds_a, preds_b)
+                mcnemar_result = {
+                    'b': float('nan'),
+                    'c': float('nan'),
+                    'p_value': float('nan'),
+                    'test_type': 'disabled',
+                }
+                if include_mcnemar:
+                    mcnemar_result = calc.mcnemar_test(self.y_test, preds_a, preds_b)
 
                 for m in metrics:
                     delta_result = calc.bootstrap_delta_ci(
@@ -266,7 +298,8 @@ class ModelBenchmark:
                     })
 
         # Apply Holm-Bonferroni correction to bootstrap p-values per metric
-        metrics_seen = list({r['metric'] for r in sig_rows})
+        # dict.fromkeys preserves insertion order (Python 3.7+), unlike set.
+        metrics_seen = list(dict.fromkeys(r['metric'] for r in sig_rows))
         for m in metrics_seen:
             subset_idx = [i for i, r in enumerate(sig_rows) if r['metric'] == m]
             raw_ps = [sig_rows[i]['bootstrap_p'] for i in subset_idx]
