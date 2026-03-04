@@ -1,8 +1,4 @@
-"""
-Model Benchmark
-===============
-Comprehensive benchmarking system for comparing multiple models.
-"""
+"""Benchmarking system for comparing multiple bot detection models."""
 
 from typing import Dict, List, Optional, Any, Union
 import numpy as np
@@ -16,16 +12,7 @@ from .metrics import MetricsCalculator
 
 
 class ModelBenchmark:
-    """
-    Comprehensive benchmarking system for bot detection models.
-    
-    Features:
-        - Train and evaluate multiple models
-        - Compare performance across metrics
-        - Generate comparison reports
-        - Visualize results
-        - Track experiments over time
-    """
+    """Benchmark multiple bot detection models; compare metrics, generate reports and plots."""
     
     def __init__(
         self,
@@ -33,14 +20,7 @@ class ModelBenchmark:
         metrics_calculator: MetricsCalculator = None,
         experiment_name: str = None
     ):
-        """
-        Initialize benchmarking system.
-        
-        Args:
-            models: Dictionary of model name to model instance
-            metrics_calculator: MetricsCalculator instance
-            experiment_name: Name for this experiment
-        """
+        """Initialize benchmark with optional models, metrics calculator, and experiment name."""
         self.models = models or {}
         self.metrics_calculator = metrics_calculator or MetricsCalculator()
         self.experiment_name = experiment_name or f"experiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -55,16 +35,7 @@ class ModelBenchmark:
         self.pairwise_significance: List[Dict[str, Any]] = []
     
     def add_model(self, name: str, model: Any) -> 'ModelBenchmark':
-        """
-        Add a model to the benchmark.
-        
-        Args:
-            name: Name for the model
-            model: Model instance
-            
-        Returns:
-            self
-        """
+        """Add a model to the benchmark."""
         self.models[name] = model
         return self
     
@@ -78,35 +49,14 @@ class ModelBenchmark:
         y_test: np.ndarray,
         feature_names: List[str] = None,
         verbose: bool = True,
-        compute_statistics: bool = True,
+        compute_statistics: bool = False,
         statistics_metrics: Optional[List[str]] = None,
         statistics_bootstrap_samples: int = 1000,
         statistics_alpha: float = 0.05,
         statistics_random_state: int = 2112,
         include_mcnemar: bool = True,
     ) -> Dict[str, Dict[str, Any]]:
-        """
-        Run benchmark on all models.
-        
-        Args:
-            X_train: Training features
-            y_train: Training labels
-            X_val: Validation features
-            y_val: Validation labels
-            X_test: Test features
-            y_test: Test labels
-            feature_names: Feature names
-            verbose: Print progress
-            compute_statistics: Whether to compute CIs/significance tests.
-            statistics_metrics: Metrics to compute inferential stats for.
-            statistics_bootstrap_samples: Number of bootstrap resamples.
-            statistics_alpha: Significance level for confidence intervals.
-            statistics_random_state: RNG seed for bootstrap reproducibility.
-            include_mcnemar: Whether to include McNemar test in pairwise stats.
-            
-        Returns:
-            Dictionary of results for each model
-        """
+        """Run benchmark on all models; optionally compute CIs and pairwise significance."""
         if verbose:
             print(f"\n{'='*60}")
             print(f"BENCHMARKING {len(self.models)} MODELS")
@@ -675,7 +625,7 @@ class ModelBenchmark:
         # Bootstrap confidence intervals
         ci_df = self.get_confidence_intervals()
         if not ci_df.empty:
-            lines.append("\n## METRIC CONFIDENCE INTERVALS (95%, bootstrap)")
+            lines.append("\n## METRIC CONFIDENCE INTERVALS (bootstrap)")
             lines.append("  Format: point [lower, upper]")
             for model_name in ci_df['model'].unique():
                 lines.append(f"\n  {model_name}:")

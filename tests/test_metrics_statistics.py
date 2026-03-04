@@ -1,13 +1,4 @@
-"""
-Tests for statistical inference methods in MetricsCalculator.
-
-Covers:
-  - bootstrap_metric_ci: shape, monotonicity (lower <= point <= upper),
-    determinism under fixed seed, graceful handling of single-class edge cases.
-  - bootstrap_delta_ci: shape, determinism, returns finite values.
-  - mcnemar_test: identical predictions -> p=1, known disagreement matrix.
-  - holm_bonferroni: ordering and upper-bound guarantee.
-"""
+"""Tests for MetricsCalculator: bootstrap CIs, delta test, McNemar, holm_bonferroni."""
 
 import importlib.util
 import math

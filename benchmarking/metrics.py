@@ -1,15 +1,4 @@
-"""
-Metrics Calculator
-==================
-Comprehensive metrics calculation for model evaluation.
-
-Includes:
-  - Point-estimate metrics (accuracy, F1, ROC-AUC, PR-AUC, MCC, kappa …)
-  - Bootstrap confidence intervals (percentile method, deterministic RNG)
-  - Paired bootstrap delta test for cross-model comparisons
-  - McNemar exact test for paired classification outcomes
-  - Holm-Bonferroni multiple-comparison correction
-"""
+"""Metrics calculator: point estimates, bootstrap CIs, paired delta test, McNemar, Holm-Bonferroni."""
 
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -22,14 +11,7 @@ from sklearn.metrics import (
 
 
 class MetricsCalculator:
-    """
-    Comprehensive metrics calculator for bot detection evaluation.
-    
-    Computes a wide range of classification metrics including:
-        - Basic: Accuracy, Precision, Recall, F1
-        - Advanced: ROC-AUC, PR-AUC, MCC, Cohen's Kappa
-        - Threshold-independent: ROC curve, PR curve
-    """
+    """Metrics for bot detection: accuracy, F1, ROC-AUC, PR-AUC, MCC, bootstrap CIs, McNemar, Holm-Bonferroni."""
     
     METRIC_DESCRIPTIONS = {
         'accuracy': 'Overall correctness of predictions',
@@ -46,12 +28,7 @@ class MetricsCalculator:
     }
     
     def __init__(self, class_names: List[str] = None):
-        """
-        Initialize metrics calculator.
-        
-        Args:
-            class_names: Names for classes ['Human', 'Bot']
-        """
+        """Initialize with optional class names (default: Human, Bot)."""
         self.class_names = class_names or ['Human', 'Bot']
 
     @staticmethod
@@ -79,17 +56,7 @@ class MetricsCalculator:
         y_pred: np.ndarray,
         y_proba: Optional[np.ndarray] = None
     ) -> Dict[str, float]:
-        """
-        Compute all available metrics.
-        
-        Args:
-            y_true: True labels
-            y_pred: Predicted labels
-            y_proba: Probability predictions (optional)
-            
-        Returns:
-            Dictionary of metric names to values
-        """
+        """Compute all available metrics for y_true, y_pred, and optional y_proba."""
         metrics = {}
         
         # Basic metrics
