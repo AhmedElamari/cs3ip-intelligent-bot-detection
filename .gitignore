@@ -22,3 +22,5 @@ agents.md
 AGENTS.md
 .cursor/
 tasks/
+.vscode/
+debug-*.log

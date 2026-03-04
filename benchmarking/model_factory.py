@@ -8,7 +8,7 @@ from models import (
     SVMModel,
     DecisionTreeModel,
     RandomForestModel,
-    GradientBoostingModel,
+    XGBoostModel,
 )
 
 
@@ -23,7 +23,7 @@ def create_models(config: Config) -> dict[str, Any]:
         'svm': SVMModel,
         'decision_tree': DecisionTreeModel,
         'random_forest': RandomForestModel,
-        'gradient_boosting': GradientBoostingModel,
+        'xgboost': XGBoostModel,
     }
 
     for model_name in enabled_models:
