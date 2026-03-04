@@ -10,6 +10,7 @@ Covers:
 """
 
 import importlib.util
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -299,7 +300,6 @@ class HolmBonferroniTest(unittest.TestCase):
         self.assertAlmostEqual(min(c for c in corrected if not math.isnan(c)), 0.02, places=10)
 
     def test_all_nan_returns_all_nan(self):
-        import math
         raw = [float('nan'), float('nan')]
         corrected = self.calc.holm_bonferroni(raw)
         self.assertEqual(len(corrected), 2)
@@ -322,7 +322,6 @@ class HolmBonferroniTest(unittest.TestCase):
 
     def test_finite_path_unchanged(self):
         """Pure finite vector must match expected Holm behaviour."""
-        import math
         raw = [0.01, 0.04, 0.03]
         corrected = self.calc.holm_bonferroni(raw)
         # All 3 are finite
