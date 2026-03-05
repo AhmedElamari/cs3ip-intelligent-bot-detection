@@ -22,7 +22,7 @@ cs3ip-intelligent-bot-detection/
 |-- FeatureEngineering.py         # Feature extraction
 |-- Preprocessing.py              # Cleaning and split helpers
 |-- main.py                       # Single-model pipeline
-|-- benchmark.py                  # Multi-model benchmark + XAI
+|-- run_benchmark.py              # Multi-model benchmark CLI + XAI
 |-- config/
 |   |-- config.py                 # Config management
 |-- models/                       # Model implementations
@@ -81,7 +81,7 @@ Expected output (console):
 
 Run a benchmark with explainability:
 ```bash
-python benchmark.py --explain --save-plots
+python run_benchmark.py --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -104,7 +104,7 @@ Options:
 
 ### Benchmarking and Explainability
 ```bash
-python benchmark.py --explain --save-plots
+python run_benchmark.py --explain --save-plots
 ```
 
 Options:
