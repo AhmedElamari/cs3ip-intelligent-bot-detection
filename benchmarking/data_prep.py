@@ -161,10 +161,9 @@ def prepare_data(data, config: Config) -> tuple:
         print(f"\nApplying {method.upper()} for class balancing...")
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method=method)
 
-    # Scale features if configured
-    if config.get('preprocessing.scale_features'):
-        print("\nScaling features...")
-        X_train, X_val, X_test = detector.scale_features(X_train, X_val, X_test)
+    # Note: Feature scaling is now applied per-model in the benchmark loop
+    # to ensure tree-based models (TabNet, RF, XGBoost, DT) don't receive
+    # scaled data while linear models (LR, SVM) do. This matches main.py behavior.
 
     # Feature selection if configured
     if config.get('preprocessing.feature_selection'):

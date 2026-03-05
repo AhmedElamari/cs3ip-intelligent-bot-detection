@@ -96,6 +96,7 @@ class TabNetModel(BaseModel):
             "n_steps": kwargs.get("n_steps", 3),
             "gamma": kwargs.get("gamma", 1.3),
             "lambda_sparse": kwargs.get("lambda_sparse", 1e-3),
+            "learning_rate": kwargs.get("learning_rate", 2e-2),
             "batch_size": kwargs.get("batch_size", 1024),
             "virtual_batch_size": kwargs.get("virtual_batch_size", 128),
             "momentum": kwargs.get("momentum", 0.02),
@@ -126,6 +127,7 @@ class TabNetModel(BaseModel):
             n_steps=kwargs["n_steps"],
             gamma=kwargs["gamma"],
             lambda_sparse=kwargs["lambda_sparse"],
+            optimizer_params={"lr": kwargs.get("learning_rate", 2e-2)},
             cat_idxs=kwargs.get("cat_idxs", []),
             cat_dims=kwargs.get("cat_dims", []),
             momentum=kwargs["momentum"],
@@ -244,7 +246,9 @@ class TabNetModel(BaseModel):
         # Save TabNet model via its own save mechanism
         tabnet_path = str(p.with_suffix(""))
         self.model.save_model(tabnet_path)
+        # Include 'model': self.model for BaseModel.load() compatibility
         meta = {
+            "model": self.model,
             "name": self.name,
             "feature_names": self.feature_names,
             "params": {k: v for k, v in self._params.items()
@@ -254,6 +258,60 @@ class TabNetModel(BaseModel):
         }
         with open(p, "wb") as f:
             pickle.dump(meta, f)
+
+    @classmethod
+    def load(cls, path: str, trusted_source: bool = False) -> "TabNetModel":
+        """Load a TabNetModel from disk.
+
+        Restores both the metadata from pickle and the underlying
+        TabNetClassifier model from its native save format.
+
+        Args:
+            path: Pickle file path created by ``save``.
+            trusted_source: Must be True to load. Pickle can execute arbitrary code.
+
+        Returns:
+            TabNetModel instance with restored state.
+        """
+        from pathlib import Path
+        import warnings
+
+        p = Path(path).expanduser().resolve()
+        if not trusted_source:
+            raise ValueError(
+                "Refusing to load pickle from an untrusted source. "
+                "Pass trusted_source=True only for files you fully trust."
+            )
+        warnings.warn(
+            "Loading a pickled model. Only load artifacts from trusted sources.",
+            UserWarning,
+            stacklevel=2,
+        )
+        with open(p, "rb") as f:
+            data = pickle.load(f)
+
+        # Reconstruct TabNetModel instance
+        instance = cls.__new__(cls)
+        instance.name = data.get("name", "TabNet")
+        instance.feature_names = data.get("feature_names", [])
+        instance._params = data.get("params", {})
+        instance.training_time = data.get("training_time", 0.0)
+        instance.is_fitted = True
+        instance.random_state = instance._params.get("random_state", 2112)
+        instance._eval_set = None
+
+        # Restore TabNet model from native checkpoint
+        tabnet_path = data.get("tabnet_path")
+        if tabnet_path:
+            _require_tabnet()
+            from pytorch_tabnet.tab_model import TabNetClassifier
+            instance.model = TabNetClassifier()
+            instance.model.load_model(tabnet_path)
+        else:
+            # Fallback: use pickled model if available
+            instance.model = data.get("model")
+
+        return instance
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -313,7 +371,11 @@ class TabNetModel(BaseModel):
                 )
                 batch_size = max(16, batch_size // 2)
                 virtual_batch_size = max(8, virtual_batch_size // 2)
-                # Rebuild model with reduced sizes
+                # Re-validate divisibility constraint: virtual_batch_size must divide batch_size
+                batch_size, virtual_batch_size = self._safe_batch_sizes(
+                    len(X_np), batch_size, virtual_batch_size
+                )
+                # Rebuild model with adjusted sizes
                 params = dict(params)
                 params["batch_size"] = batch_size
                 params["virtual_batch_size"] = virtual_batch_size

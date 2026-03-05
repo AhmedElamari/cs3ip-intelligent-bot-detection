@@ -175,8 +175,8 @@ def run_pipeline(
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method='smote')
         print(f"After SMOTE: {len(X_train)} training samples")
     
-    # Step 6: Feature scaling (recommended for logistic regression/SVM; skip for TabNet)
-    should_scale = use_scaling or model_type in ('logistic_regression', 'svm')
+    # Step 6: Feature scaling (recommended for logistic regression/SVM)
+    should_scale = (use_scaling or model_type in ('logistic_regression', 'svm')) and model_type != 'tabnet'
     if should_scale:
         if use_scaling:
             print("\nApplying feature scaling...")

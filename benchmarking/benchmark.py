@@ -69,19 +69,33 @@ class ModelBenchmark:
         self.y_val = y_val
         self.y_test = y_test
         
+        # Models that benefit from feature scaling
+        SCALED_MODELS = {'logistic_regression', 'svm'}
+        
         for name, model in self.models.items():
             if verbose:
                 print(f"\n{'-'*40}")
                 print(f"Training: {name}")
                 print(f"{'-'*40}")
             
+            # Determine if this model needs scaled features
+            needs_scaling = name in SCALED_MODELS
+            if needs_scaling:
+                if verbose:
+                    print("  (Applying feature scaling)")
+                X_train_scaled, X_val_scaled, X_test_scaled = self._scale_features(
+                    X_train, X_val, X_test
+                )
+            else:
+                X_train_scaled, X_val_scaled, X_test_scaled = X_train, X_val, X_test
+            
             # Register validation data for early stopping (TabNet and future models)
             if hasattr(model, 'prepare_eval_set'):
-                model.prepare_eval_set(X_val, y_val)
+                model.prepare_eval_set(X_val_scaled, y_val)
 
             # Train model
             start_time = time.time()
-            model.fit(X_train, y_train, feature_names=feature_names)
+            model.fit(X_train_scaled, y_train, feature_names=feature_names)
             training_time = time.time() - start_time
             self.training_times[name] = training_time
             
@@ -89,8 +103,8 @@ class ModelBenchmark:
                 print(f"Training time: {training_time:.2f}s")
             
             # Get predictions
-            y_val_pred = model.predict(X_val)
-            y_test_pred = model.predict(X_test)
+            y_val_pred = model.predict(X_val_scaled)
+            y_test_pred = model.predict(X_test_scaled)
             self.predictions[name] = y_test_pred
             
             # Get probabilities if available
@@ -586,7 +600,26 @@ class ModelBenchmark:
                 f"Path must stay within workspace: {workspace}"
             )
         return resolved
-    
+
+    @staticmethod
+    def _scale_features(X_train, X_val, X_test):
+        """Apply StandardScaler for models that benefit from feature scaling.
+
+        Args:
+            X_train: Training features
+            X_val: Validation features
+            X_test: Test features
+
+        Returns:
+            Tuple of scaled (X_train, X_val, X_test)
+        """
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_val_scaled = scaler.transform(X_val)
+        X_test_scaled = scaler.transform(X_test)
+        return X_train_scaled, X_val_scaled, X_test_scaled
+
     def generate_report(self) -> str:
         """
         Generate a text report of benchmark results.
