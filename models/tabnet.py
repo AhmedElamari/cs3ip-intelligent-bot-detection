@@ -27,9 +27,6 @@ import numpy as np
 
 from .base import BaseModel
 
-# ---------------------------------------------------------------------------
-# Dependency guard
-# ---------------------------------------------------------------------------
 
 def _require_tabnet():
     try:
@@ -40,10 +37,6 @@ def _require_tabnet():
             "profile:\n  pip install -r requirements-dl.txt"
         ) from exc
 
-
-# ---------------------------------------------------------------------------
-# Helper: per-sample weights from class_weight spec
-# ---------------------------------------------------------------------------
 
 def _sample_weights(y: np.ndarray, class_weight) -> Optional[np.ndarray]:
     """Convert class_weight specification to a per-sample weight array."""
@@ -61,17 +54,13 @@ def _sample_weights(y: np.ndarray, class_weight) -> Optional[np.ndarray]:
     return np.array([wmap[int(lbl)] for lbl in y_int], dtype=np.float64)
 
 
-# ---------------------------------------------------------------------------
-# TabNet model wrapper
-# ---------------------------------------------------------------------------
-
 class TabNetModel(BaseModel):
     """
     TabNet classifier for bot detection.
 
     Wraps ``pytorch_tabnet.tab_model.TabNetClassifier`` and satisfies the
     ``BaseModel`` contract so it integrates into both the single-model CLI
-    (``main.py``) and the benchmark pipeline (``benchmark.py``).
+    (``main.py``) and the benchmark pipeline (``run_benchmark.py``).
 
     Key parameters (all override-able via ``**kwargs``):
         n_d / n_a   : Width of decision and attention embedding layers.
@@ -273,10 +262,10 @@ class TabNetModel(BaseModel):
         Returns:
             TabNetModel instance with restored state.
         """
-        from pathlib import Path
+        import pickle
         import warnings
 
-        p = Path(path).expanduser().resolve()
+        p = cls._validate_output_path(path)
         if not trusted_source:
             raise ValueError(
                 "Refusing to load pickle from an untrusted source. "

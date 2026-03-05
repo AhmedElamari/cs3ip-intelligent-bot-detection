@@ -49,7 +49,7 @@ def prepare_data(data, config: Config) -> tuple:
         data: Dictionary of data splits keyed by split name to corresponding DataFrame
             (e.g. {'train': train_df, 'val': val_df, 'test': test_df}).
         config: Configuration object controlling preprocessing options
-            such as imbalance handling, feature scaling, and feature selection.
+            such as imbalance handling, feature scaling policy, and feature selection.
 
     Returns:
         Tuple containing the training, validation, and test splits plus feature names.
@@ -161,9 +161,7 @@ def prepare_data(data, config: Config) -> tuple:
         print(f"\nApplying {method.upper()} for class balancing...")
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method=method)
 
-    # Note: Feature scaling is now applied per-model in the benchmark loop
-    # to ensure tree-based models (TabNet, RF, XGBoost, DT) don't receive
-    # scaled data while linear models (LR, SVM) do. This matches main.py behavior.
+    # Scaling is per-model in run_benchmark; config key preprocessing.scale_features toggles it.
 
     # Feature selection if configured
     if config.get('preprocessing.feature_selection'):

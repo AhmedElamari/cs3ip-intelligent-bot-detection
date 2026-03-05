@@ -4,7 +4,7 @@ Benchmarking Module
 Tools for comparing and evaluating multiple ML models.
 """
 
-from .benchmark import ModelBenchmark
+from .model_benchmark import ModelBenchmark
 from .metrics import MetricsCalculator
 
 __all__ = [

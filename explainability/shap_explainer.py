@@ -11,7 +11,7 @@ class SHAPExplainer:
     
     def __init__(self, model, feature_names: List[str] = None):
         """Initialize with trained model and optional feature names."""
-        self._raw_model = model  # Original model (for KernelExplainer predict_proba)
+        self._raw_model = model
         self.model = self._get_underlying_model(model)
         self.feature_names = feature_names
         self.explainer = None
@@ -20,7 +20,7 @@ class SHAPExplainer:
     
     def _get_underlying_model(self, model):
         """Extract underlying sklearn model if wrapped."""
-        if hasattr(model, 'model'):  # BaseModel wrapper
+        if hasattr(model, 'model'):
             return model.model
         return model
 
@@ -32,6 +32,29 @@ class SHAPExplainer:
         if 'tabnet' in name:
             return shap.KernelExplainer(lambda x: self._raw_model.predict_proba(x), X_background)
         return shap.Explainer(self.model, X_background)
+
+    def _compute_shap_values(self, X: Union[np.ndarray, pd.DataFrame]):
+        """Compute SHAP values across both callable and legacy APIs."""
+        if callable(self.explainer):
+            return self.explainer(X)
+        if hasattr(self.explainer, 'shap_values'):
+            return self.explainer.shap_values(X)
+        raise TypeError("Unsupported SHAP explainer API: expected callable or shap_values().")
+
+    @staticmethod
+    def _to_values_array(shap_output: Any) -> np.ndarray:
+        """Normalize SHAP output into a 2D (samples, features) ndarray."""
+        if hasattr(shap_output, 'values'):
+            values = np.asarray(shap_output.values)
+        elif isinstance(shap_output, list):
+            class_values = shap_output[1] if len(shap_output) > 1 else shap_output[0]
+            values = np.asarray(class_values)
+        else:
+            values = np.asarray(shap_output)
+
+        if values.ndim == 3:
+            values = values[:, :, 1]
+        return values
 
     def fit(self, X: Union[np.ndarray, pd.DataFrame], max_samples: int = 100) -> 'SHAPExplainer':
         """Fit SHAP explainer on background data (up to max_samples)."""
@@ -75,18 +98,8 @@ class SHAPExplainer:
         if not self._is_fitted:
             raise RuntimeError("Explainer not fitted. Call fit() first.")
         
-        import shap
-        
-        self.shap_values = self.explainer(X)
-        
-        # Handle different SHAP value formats
-        if hasattr(self.shap_values, 'values'):
-            values = self.shap_values.values
-            # For binary classification, take positive class
-            if len(values.shape) == 3:
-                values = values[:, :, 1]
-            return values
-        return self.shap_values
+        self.shap_values = self._compute_shap_values(X)
+        return self._to_values_array(self.shap_values)
     
     def get_global_importance(self) -> Dict[str, float]:
         """
@@ -98,15 +111,8 @@ class SHAPExplainer:
         if self.shap_values is None:
             raise RuntimeError("No SHAP values computed. Call explain() first.")
         
-        import shap
-        
-        if hasattr(self.shap_values, 'values'):
-            values = self.shap_values.values
-            if len(values.shape) == 3:
-                values = values[:, :, 1]
-        else:
-            values = self.shap_values
-        
+        values = self._to_values_array(self.shap_values)
+
         # Mean absolute SHAP value per feature
         importance = np.abs(values).mean(axis=0)
         return dict(zip(self.feature_names, importance))
@@ -212,10 +218,13 @@ class SHAPExplainer:
         
         if self.shap_values is None:
             self.explain(X)
-        
+        expected_value = getattr(self.explainer, 'expected_value', 0)
+        if isinstance(expected_value, (list, np.ndarray)):
+            expected_value = expected_value[1] if len(expected_value) > 1 else expected_value[0]
+
         return shap.force_plot(
-            self.explainer.expected_value if hasattr(self.explainer, 'expected_value') else 0,
-            self.shap_values[instance_idx].values if hasattr(self.shap_values[instance_idx], 'values') else self.shap_values[instance_idx],
+            expected_value,
+            self._to_values_array(self.shap_values)[instance_idx],
             X[instance_idx] if hasattr(X, '__getitem__') else X,
             feature_names=self.feature_names
         )
@@ -245,7 +254,7 @@ class SHAPExplainer:
         
         shap.dependence_plot(
             feature,
-            self.shap_values.values if hasattr(self.shap_values, 'values') else self.shap_values,
+            self._to_values_array(self.shap_values),
             X,
             feature_names=self.feature_names,
             interaction_index=interaction_feature,
