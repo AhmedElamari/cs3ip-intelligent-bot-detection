@@ -239,7 +239,8 @@ def load_hpo_result(path: Path) -> dict:
 def best_params_for_tabnetmodel(hpo_result: dict) -> dict:
     """Extract TabNetModel constructor kwargs from an HPOResultV1 result.
 
-    Drops ``learning_rate`` (optimizer param) and ``virtual_batch_size_ratio``.
+    Drops ``virtual_batch_size_ratio`` (search-space helper only) and keeps
+    ``learning_rate`` so callers can reproduce the HPO winner configuration.
     Recomputes ``virtual_batch_size`` from ratio when missing (backward compat
     for artifacts saved before the HPO fix). Callers can safely do
     ``TabNetModel(**best_params_for_tabnetmodel(result))``.
@@ -251,7 +252,7 @@ def best_params_for_tabnetmodel(hpo_result: dict) -> dict:
         Cleaned kwargs dict ready for TabNetModel(**kwargs).
     """
     params = dict(hpo_result.get("best_params", {}))
-    params.pop("learning_rate", None)
+    # Keep learning_rate for TabNetModel.optimizer_params
     ratio = params.pop("virtual_batch_size_ratio", None)
     if "virtual_batch_size" not in params and ratio is not None:
         params["virtual_batch_size"] = _compute_virtual_batch_size(
