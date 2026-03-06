@@ -127,6 +127,17 @@ class Config:
                 'methods': ['builtin', 'permutation'],
             },
         },
+
+        'robustness': {
+            'enabled': False,
+            'attack_population': 'true_bots',
+            'profiles': ['cheap_only', 'realistic_mixed'],
+            'evaluate_single_feature_attacks': True,
+            'evaluate_bundle_attacks': True,
+            'shap_top_k': 5,
+            'max_shap_samples': 50,
+            'expensive_nudge_fraction': 0.05,
+        },
         
         'output': {
             'save_models': True,
@@ -406,6 +417,18 @@ explainability:
     methods:
       - builtin
       - permutation
+
+robustness:
+  enabled: false
+  attack_population: true_bots
+  profiles:
+    - cheap_only
+    - realistic_mixed
+  evaluate_single_feature_attacks: true
+  evaluate_bundle_attacks: true
+  shap_top_k: 5
+  max_shap_samples: 50
+  expensive_nudge_fraction: 0.05
 
 output:
   save_models: true
