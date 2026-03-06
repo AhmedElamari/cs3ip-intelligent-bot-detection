@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -514,6 +515,35 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
         np.testing.assert_allclose(np.mean(X_tr_lr, axis=0), 0, atol=1e-5)
         np.testing.assert_array_almost_equal(X_tr_rf, X_train)
 
+    def test_model_results_do_not_store_redundant_base_inputs(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='dedupe_inputs')
+        results = benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+
+        result = results['logistic_regression']
+        self.assertNotIn('base_X_train', result)
+        self.assertNotIn('base_X_val', result)
+        self.assertNotIn('base_X_test', result)
+        self.assertIsNotNone(benchmark.base_train_inputs)
+        self.assertIsNotNone(benchmark.base_val_inputs)
+        self.assertIsNotNone(benchmark.base_test_inputs)
+
     def test_run_explainability_analysis_uses_prepared_inputs(self):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
@@ -543,6 +573,37 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
             out = Path(tmp)
             results = run_explainability_analysis(benchmark, feature_names, config, out)
         self.assertIn('lime_explanations', results)
+
+    def test_optional_robustness_analysis_writes_artifacts(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from benchmarking.robustness import run_robustness_analysis
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 5)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='robustness_smoke')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+
+        with TemporaryDirectory(dir=ROOT) as tmp:
+            out = Path(tmp)
+            results = run_robustness_analysis(benchmark, feature_names, config, out)
+            self.assertIn('summary', results)
+            self.assertTrue((out / 'robustness_summary.csv').exists())
+            self.assertTrue((out / 'feature_attack_results.csv').exists())
 
 
 if __name__ == '__main__':
