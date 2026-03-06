@@ -3,16 +3,24 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-import numpy as np
-import pandas as pd
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - exercised by dependency-aware skip
+    np = None
+
+try:
+    import pandas as pd
+except ImportError:  # pragma: no cover - exercised by dependency-aware skip
+    pd = None
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 SKLEARN_AVAILABLE = importlib.util.find_spec("sklearn") is not None
-NUMPY_AVAILABLE = importlib.util.find_spec("numpy") is not None
-PANDAS_AVAILABLE = importlib.util.find_spec("pandas") is not None
+NUMPY_AVAILABLE = np is not None
+PANDAS_AVAILABLE = pd is not None
 
 
 def _make_splits():
@@ -99,10 +107,56 @@ class RobustnessAnalysisTest(unittest.TestCase):
         self.assertIn('feature_attacks', results)
         summary = results['summary']
         feature_attacks = results['feature_attacks']
+        diagnostics = results['shap_diagnostics']
         for column in ('model', 'profile', 'attacked_true_bots', 'baseline_detected_bots', 'flip_rate'):
             self.assertIn(column, summary.columns)
-        for column in ('model', 'feature', 'cost_tier', 'baseline_detected_bots', 'confidence_drop_mean'):
+        for column in (
+            'model', 'feature', 'cost_tier', 'baseline_detected_bots',
+            'confidence_drop_mean', 'shap_status', 'shap_error',
+        ):
             self.assertIn(column, feature_attacks.columns)
+        for column in ('model', 'stage', 'status', 'error'):
+            self.assertIn(column, diagnostics.columns)
+
+    def test_shap_build_failures_are_recorded(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+        analyzer.supported_shap_models = {'logistic_regression'}
+        with mock.patch('benchmarking.robustness.SHAPExplainer') as mock_explainer:
+            mock_explainer.return_value.fit.side_effect = ImportError('SHAP unavailable')
+            with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+                output_dir = Path(tmp)
+                results = analyzer.run()
+                analyzer.save_outputs(output_dir, results)
+                self.assertTrue((output_dir / 'shap_diagnostics.csv').exists())
+
+        failed_rows = results['feature_attacks'][results['feature_attacks']['shap_status'] == 'build_failed']
+        self.assertFalse(failed_rows.empty)
+        self.assertTrue(failed_rows['shap_error'].str.contains('ImportError: SHAP unavailable').all())
+        self.assertEqual({'build_failed'}, set(results['shap_diagnostics']['status']))
+
+    def test_shap_explain_failures_are_recorded(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+        analyzer.supported_shap_models = {'logistic_regression'}
+        baseline_values = np.zeros((2, len(feature_names)))
+        with mock.patch('benchmarking.robustness.SHAPExplainer') as mock_explainer:
+            explainer = mock_explainer.return_value
+            explainer.explain.side_effect = [baseline_values] + [ValueError('mutated SHAP failed')] * 32
+            results = analyzer.run()
+
+        failed_rows = results['feature_attacks'][results['feature_attacks']['shap_status'] == 'explain_failed']
+        self.assertFalse(failed_rows.empty)
+        self.assertTrue(failed_rows['shap_error'].str.contains('ValueError: mutated SHAP failed').all())
+        self.assertEqual({'explain_failed'}, set(results['shap_diagnostics']['status']))
 
 
 if __name__ == '__main__':
