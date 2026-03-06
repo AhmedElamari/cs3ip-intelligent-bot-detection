@@ -515,6 +515,35 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
         np.testing.assert_allclose(np.mean(X_tr_lr, axis=0), 0, atol=1e-5)
         np.testing.assert_array_almost_equal(X_tr_rf, X_train)
 
+    def test_model_results_do_not_store_redundant_base_inputs(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='dedupe_inputs')
+        results = benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+
+        result = results['logistic_regression']
+        self.assertNotIn('base_X_train', result)
+        self.assertNotIn('base_X_val', result)
+        self.assertNotIn('base_X_test', result)
+        self.assertIsNotNone(benchmark.base_train_inputs)
+        self.assertIsNotNone(benchmark.base_val_inputs)
+        self.assertIsNotNone(benchmark.base_test_inputs)
+
     def test_run_explainability_analysis_uses_prepared_inputs(self):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
