@@ -130,6 +130,9 @@ class ModelBenchmark:
                 'test_metrics': test_metrics,
                 'feature_importance': feature_importance,
                 'is_interpretable': model.is_interpretable if hasattr(model, 'is_interpretable') else False,
+                'X_train': X_train_model,
+                'X_val': X_val_model,
+                'X_test': X_test_model,
             }
 
             if verbose:
@@ -320,6 +323,19 @@ class ModelBenchmark:
             name for name, result in self.results.items()
             if result['is_interpretable']
         ]
+
+    def get_prepared_inputs(self, model_name: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Return (X_train, X_val, X_test) used for the given model. Raises if model not found."""
+        if model_name not in self.results:
+            raise KeyError(f"Model {model_name!r} not in benchmark results.")
+        r = self.results[model_name]
+        for k in ('X_train', 'X_val', 'X_test'):
+            if k not in r:
+                raise ValueError(
+                    f"Prepared inputs not stored for {model_name}. "
+                    "Ensure run_benchmark() completed successfully."
+                )
+        return r['X_train'], r['X_val'], r['X_test']
 
     def get_feature_importance_comparison(self) -> pd.DataFrame:
         importance_data = {}

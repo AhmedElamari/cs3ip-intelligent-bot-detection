@@ -14,7 +14,7 @@ Key features of this wrapper:
 - Hardware safety: automatic CPU fallback; bounded CUDA OOM retry.
 - Determinism: NumPy + PyTorch seeds fixed to random_state.
 - Early stopping: pass X_val/y_val via prepare_eval_set() before fit().
-- Imbalance: class_weight='balanced' or dict → per-sample weights.
+- Imbalance: class_weight='balanced' or dict -> per-sample weights.
 
 Install:  pip install -r requirements-dl.txt
 """
@@ -49,6 +49,9 @@ def _sample_weights(y: np.ndarray, class_weight) -> Optional[np.ndarray]:
         wmap = {c: total / (len(classes) * n) for c, n in zip(classes, counts)}
     elif isinstance(class_weight, dict):
         wmap = {int(k): v for k, v in class_weight.items()}
+        missing = sorted(int(x) for x in (set(y_int) - set(wmap)))
+        if missing:
+            raise ValueError(f"class_weight dict missing label(s): {missing}")
     else:
         raise ValueError(f"Unsupported class_weight: {class_weight!r}")
     return np.array([wmap[int(lbl)] for lbl in y_int], dtype=np.float64)
@@ -73,7 +76,7 @@ class TabNetModel(BaseModel):
         mask_type   : 'sparsemax' (default) or 'entmax'.
         max_epochs  : Training epoch cap.
         patience    : Early-stopping patience (epochs without improvement).
-        class_weight: 'balanced', None, or class→weight dict.
+        class_weight: 'balanced', None, or class->weight dict.
     """
 
     def __init__(self, random_state: int = 2112, **kwargs):
@@ -97,7 +100,7 @@ class TabNetModel(BaseModel):
             "cat_idxs": kwargs.get("cat_idxs", []),
             "cat_dims": kwargs.get("cat_dims", []),
         }
-        # Eval set for early stopping — set via prepare_eval_set()
+        # Eval set for early stopping - set via prepare_eval_set()
         self._eval_set: Optional[list] = None
         self.model = None  # Created lazily in fit()
 
@@ -184,7 +187,7 @@ class TabNetModel(BaseModel):
         params.update({"batch_size": batch_size, "virtual_batch_size": virtual_batch_size})
         self.model = self._create_model(**params)
 
-        # Class weights → per-sample weights (TabNet: 0 = none, array = custom)
+        # Class weights -> per-sample weights (TabNet: 0 = none, array = custom)
         weights = _sample_weights(y_np, self._params.get("class_weight"))
         weights_arg = weights if weights is not None else 0
 
@@ -235,9 +238,7 @@ class TabNetModel(BaseModel):
         # Save TabNet model via its own save mechanism
         tabnet_path = str(p.with_suffix(""))
         self.model.save_model(tabnet_path)
-        # Include 'model': self.model for BaseModel.load() compatibility
         meta = {
-            "model": self.model,
             "name": self.name,
             "feature_names": self.feature_names,
             "params": {k: v for k, v in self._params.items()
@@ -293,9 +294,13 @@ class TabNetModel(BaseModel):
         tabnet_path = data.get("tabnet_path")
         if tabnet_path:
             _require_tabnet()
+            from pathlib import Path
             from pytorch_tabnet.tab_model import TabNetClassifier
             instance.model = TabNetClassifier()
-            instance.model.load_model(tabnet_path)
+            zip_path = tabnet_path if str(tabnet_path).endswith(".zip") else f"{tabnet_path}.zip"
+            if not Path(zip_path).exists():
+                raise FileNotFoundError(f"TabNet checkpoint not found: {zip_path}")
+            instance.model.load_model(zip_path)
         else:
             # Fallback: use pickled model if available
             instance.model = data.get("model")
