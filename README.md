@@ -96,12 +96,12 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` â€” profile-level attack metrics
-- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` â€” per-feature attack metrics
-- `results/benchmark_YYYYMMDD_HHMMSS/shap_rank_stability.csv` â€” SHAP stability rows when available
-- `results/benchmark_YYYYMMDD_HHMMSS/feature_resilience_scores.csv` â€” FRS values when SHAP succeeds
-- `results/benchmark_YYYYMMDD_HHMMSS/shap_pivot_features.csv` â€” features that gain or lose explanatory prominence
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` â€” machine-readable robustness summary
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level attack metrics
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature attack metrics
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_rank_stability.csv` — SHAP stability rows when available
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_resilience_scores.csv` — FRS values when SHAP succeeds
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_pivot_features.csv` — features that gain or lose explanatory prominence
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` — machine-readable robustness summary
 
 ### Single Model Pipeline
 ```bash
