@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from explainability.shap_explainer import SHAPExplainer
-from benchmarking.benchmark import ModelBenchmark
+from benchmarking import ModelBenchmark
 from models.base import BaseModel
 
 

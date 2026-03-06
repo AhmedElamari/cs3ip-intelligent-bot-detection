@@ -7,7 +7,9 @@ This project implements an interpretable bot detection pipeline for social media
 - Structured data loading for TwiBot-20 JSON
 - Feature engineering with leakage-aware account age computation
 - Train/validation/test splits with reproducible random state
-- Multiple supervised models with a common interface (LR, RF, XGBoost, SVM, DT)
+- Multiple supervised models with a common interface (LR, RF, XGBoost, SVM, DT, TabNet)
+- **TabNet deep learning model** — sequential attention with intrinsic interpretability (feature masks)
+- Balanced hyperparameter optimisation for TabNet via Optuna (40-60 trial balanced search)
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
@@ -20,7 +22,7 @@ cs3ip-intelligent-bot-detection/
 |-- FeatureEngineering.py         # Feature extraction
 |-- Preprocessing.py              # Cleaning and split helpers
 |-- main.py                       # Single-model pipeline
-|-- benchmark.py                  # Multi-model benchmark + XAI
+|-- run_benchmark.py              # Multi-model benchmark CLI + XAI
 |-- config/
 |   |-- config.py                 # Config management
 |-- models/                       # Model implementations
@@ -46,6 +48,15 @@ Optional XAI tooling:
 pip install shap lime matplotlib seaborn
 ```
 
+Optional deep-learning profile (TabNet + HPO):
+```bash
+# CPU
+pip install -r requirements-dl.txt
+# GPU (adjust CUDA version to match your driver)
+pip install torch --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements-dl.txt
+```
+
 > **Migration note** — the `gradient_boosting` model key was replaced by `xgboost` in the
 > config, CLI, and model registry.  Any existing config files or `--models gradient_boosting`
 > invocations must be updated to use `xgboost`.
@@ -60,6 +71,8 @@ Example files assumed:
 Run a single model:
 ```bash
 python main.py --model random_forest
+# With TabNet (requires: pip install -r requirements-dl.txt)
+python main.py --model tabnet
 ```
 Expected output (console):
 - Training/validation/test sizes
@@ -68,7 +81,7 @@ Expected output (console):
 
 Run a benchmark with explainability:
 ```bash
-python benchmark.py --explain --save-plots
+python run_benchmark.py --explain --save-plots
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
@@ -84,22 +97,30 @@ python main.py --model random_forest
 ```
 
 Options:
-- `--model`: `random_forest`, `logistic_regression`, `svm` (XGBoost is available in benchmark only)
+- `--model`: `random_forest`, `logistic_regression`, `svm`, `tabnet` (tabnet requires the DL profile)
 - `--smote`: enable SMOTE
 - `--scale`: enable feature scaling
 - `--features`: select top-k features
 
 ### Benchmarking and Explainability
 ```bash
-python benchmark.py --explain --save-plots
+python run_benchmark.py --explain --save-plots
 ```
 
 Options:
 - `--config`: load YAML or JSON config
-- `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost`)
+- `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost tabnet`)
 - `--smote` / `--scale`: override preprocessing settings
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
+
+### TabNet Hyperparameter Optimisation
+Run balanced Optuna HPO (40-60 trials) for TabNet before or after a benchmark:
+```python
+from benchmarking.tabnet_optuna import optimize_tabnet
+result = optimize_tabnet(X_train, y_train, X_val, y_val, n_trials=50, output_path="results/hpo.json")
+```
+The best params are saved as a validated `HPOResultV1` JSON artifact and can be loaded back via `load_hpo_result("results/hpo.json")`.
 
 ## Configuration
 Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.

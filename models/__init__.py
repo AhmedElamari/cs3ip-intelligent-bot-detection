@@ -11,6 +11,7 @@ from .svm import SVMModel
 from .decision_tree import DecisionTreeModel
 from .random_forest import RandomForestModel
 from .xgboost import XGBoostModel
+from .tabnet import TabNetModel
 
 __all__ = [
     'BaseModel',
@@ -19,6 +20,7 @@ __all__ = [
     'DecisionTreeModel',
     'RandomForestModel',
     'XGBoostModel',
+    'TabNetModel',
 ]
 
 # Model registry for easy access
@@ -28,6 +30,7 @@ MODEL_REGISTRY = {
     'decision_tree': DecisionTreeModel,
     'random_forest': RandomForestModel,
     'xgboost': XGBoostModel,
+    'tabnet': TabNetModel,
 }
 
 
