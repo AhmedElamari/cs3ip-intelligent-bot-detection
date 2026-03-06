@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -55,7 +56,7 @@ def _make_splits():
 )
 class RobustnessAnalysisTest(unittest.TestCase):
 
-    def _build_benchmark(self):
+    def _build_benchmark(self, *, feature_selection=False, n_features=5):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
@@ -66,6 +67,8 @@ class RobustnessAnalysisTest(unittest.TestCase):
         for name in config.get('models', {}).keys():
             config.set(f'models.{name}.enabled', name == 'logistic_regression')
         config.set('preprocessing.scale_features', True)
+        config.set('preprocessing.feature_selection', feature_selection)
+        config.set('preprocessing.n_features', n_features)
         X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
         benchmark = ModelBenchmark(models=create_models(config), experiment_name='robustness')
         benchmark.run_benchmark(
@@ -83,6 +86,21 @@ class RobustnessAnalysisTest(unittest.TestCase):
         replayed_test = benchmark.prepare_eval_inputs('logistic_regression', benchmark.base_test_inputs)
         np.testing.assert_allclose(replayed_test, expected_test)
         self.assertEqual(expected_train.shape[1], replayed_test.shape[1])
+
+    def test_prepare_eval_inputs_aligns_wider_dataframe_to_model_features(self):
+        benchmark, _, feature_names = self._build_benchmark(feature_selection=True, n_features=5)
+        expected_test = benchmark.get_prepared_inputs('logistic_regression')[2]
+        wider_eval = pd.DataFrame(
+            benchmark.base_test_inputs,
+            columns=feature_names,
+        )
+        wider_eval = wider_eval.assign(extra_noise=1.0)
+        wider_eval = wider_eval[['extra_noise', *feature_names]]
+
+        replayed_test = benchmark.prepare_eval_inputs('logistic_regression', wider_eval)
+
+        np.testing.assert_allclose(replayed_test, expected_test)
+        self.assertEqual(expected_test.shape[1], replayed_test.shape[1])
 
     def test_disabled_robustness_returns_no_results(self):
         from benchmarking.robustness import run_robustness_analysis
@@ -117,6 +135,31 @@ class RobustnessAnalysisTest(unittest.TestCase):
             self.assertIn(column, feature_attacks.columns)
         for column in ('model', 'stage', 'status', 'error'):
             self.assertIn(column, diagnostics.columns)
+
+    def test_save_outputs_writes_compact_json_manifest(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            output_dir = Path(tmp)
+            results = analyzer.run()
+            analyzer.save_outputs(output_dir, results)
+            report = json.loads((output_dir / 'robustness_report.json').read_text(encoding='utf-8'))
+
+        self.assertIn('artifacts', report)
+        self.assertIn('overview', report)
+        self.assertNotIn('summary_rows', report)
+        self.assertNotIn('shap_rank_stability_rows', report)
+
+        summary_manifest = report['artifacts']['summary']
+        self.assertEqual('robustness_summary.csv', summary_manifest['file'])
+        self.assertEqual(len(results['summary']), summary_manifest['rows'])
+        self.assertListEqual(list(results['summary'].columns), summary_manifest['columns'])
+        self.assertEqual(['logistic_regression'], report['overview']['models'])
 
     def test_shap_build_failures_are_recorded(self):
         from benchmarking.robustness import RobustnessAnalyzer

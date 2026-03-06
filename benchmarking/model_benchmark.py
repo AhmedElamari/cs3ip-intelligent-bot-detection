@@ -72,9 +72,9 @@ class ModelBenchmark:
 
         self.y_val = y_val
         self.y_test = y_test
-        self.base_train_inputs = X_train.copy() if hasattr(X_train, 'copy') else np.array(X_train, copy=True)
-        self.base_val_inputs = X_val.copy() if hasattr(X_val, 'copy') else np.array(X_val, copy=True)
-        self.base_test_inputs = X_test.copy() if hasattr(X_test, 'copy') else np.array(X_test, copy=True)
+        self.base_train_inputs = self._copy_input(X_train)
+        self.base_val_inputs = self._copy_input(X_val)
+        self.base_test_inputs = self._copy_input(X_test)
         self.base_y_train = np.asarray(y_train)
         self.base_feature_names = list(feature_names or [])
 
@@ -144,9 +144,6 @@ class ModelBenchmark:
                 'X_train': X_train_model,
                 'X_val': X_val_model,
                 'X_test': X_test_model,
-                'base_X_train': X_train.copy() if hasattr(X_train, 'copy') else np.array(X_train, copy=True),
-                'base_X_val': X_val.copy() if hasattr(X_val, 'copy') else np.array(X_val, copy=True),
-                'base_X_test': X_test.copy() if hasattr(X_test, 'copy') else np.array(X_test, copy=True),
                 'feature_names': list(feature_names or []),
                 'scaler': scaler,
             }
@@ -360,9 +357,13 @@ class ModelBenchmark:
     ) -> Union[np.ndarray, pd.DataFrame]:
         if model_name not in self.results:
             raise KeyError(f"Model {model_name!r} not in benchmark results.")
-        scaler = self.results[model_name].get('scaler')
+        result = self.results[model_name]
+        X_eval = self._align_eval_input(X_eval, result.get('feature_names') or [])
+        scaler = result.get('scaler')
         if scaler is None:
-            return X_eval.copy() if hasattr(X_eval, 'copy') else np.array(X_eval, copy=True)
+            return self._copy_input(X_eval)
+        if isinstance(X_eval, pd.DataFrame) and not hasattr(scaler, 'feature_names_in_'):
+            X_eval = X_eval.to_numpy()
         return scaler.transform(X_eval)
 
     def get_feature_importance_comparison(self) -> pd.DataFrame:
@@ -537,6 +538,26 @@ class ModelBenchmark:
         X_val_scaled = scaler.transform(X_val)
         X_test_scaled = scaler.transform(X_test)
         return X_train_scaled, X_val_scaled, X_test_scaled, scaler
+
+    @staticmethod
+    def _copy_input(data: Union[np.ndarray, pd.DataFrame]) -> Union[np.ndarray, pd.DataFrame]:
+        return data.copy() if hasattr(data, 'copy') else np.array(data, copy=True)
+
+    @staticmethod
+    def _align_eval_input(
+        X_eval: Union[np.ndarray, pd.DataFrame],
+        feature_names: List[str],
+    ) -> Union[np.ndarray, pd.DataFrame]:
+        if not isinstance(X_eval, pd.DataFrame) or not feature_names:
+            return X_eval
+
+        missing = [name for name in feature_names if name not in X_eval.columns]
+        if missing:
+            raise ValueError(
+                "Evaluation input is missing required model features: "
+                f"{missing}"
+            )
+        return X_eval.loc[:, feature_names]
 
     @classmethod
     def _prepare_model_inputs(

@@ -513,12 +513,67 @@ class RobustnessAnalyzer:
             results[key].to_csv(output_dir / filename, index=False)
 
         report = {
-            'summary_rows': results['summary'].to_dict(orient='records'),
-            'feature_attack_rows': results['feature_attacks'].to_dict(orient='records'),
-            'shap_rank_stability_rows': results['shap_rank_stability'].to_dict(orient='records'),
-            'feature_resilience_rows': results['feature_resilience'].to_dict(orient='records'),
-            'shap_pivot_rows': results['shap_pivots'].to_dict(orient='records'),
-            'shap_diagnostics_rows': results['shap_diagnostics'].to_dict(orient='records'),
+            'artifacts': {
+                key: self._artifact_manifest(filename, results[key])
+                for key, filename in file_map.items()
+            },
+            'overview': self._report_overview(results),
         }
         with open(output_dir / 'robustness_report.json', 'w', encoding='utf-8') as handle:
-            json.dump(report, handle, indent=2)
+            json.dump(report, handle, default=self._json_default, separators=(',', ':'))
+
+    @staticmethod
+    def _artifact_manifest(filename: str, frame: pd.DataFrame) -> Dict[str, Any]:
+        return {
+            'file': filename,
+            'rows': int(len(frame)),
+            'columns': frame.columns.tolist(),
+        }
+
+    @classmethod
+    def _report_overview(cls, results: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        summary = results['summary']
+        feature_attacks = results['feature_attacks']
+        feature_resilience = results['feature_resilience']
+
+        return {
+            'models': cls._sorted_unique(summary, 'model'),
+            'profiles': cls._sorted_unique(summary, 'profile'),
+            'features_evaluated': cls._sorted_unique(feature_attacks, 'feature'),
+            'baseline_detected_bots_total': cls._sum_column(summary, 'baseline_detected_bots'),
+            'attacked_true_bots_total': cls._sum_column(summary, 'attacked_true_bots'),
+            'mean_flip_rate': cls._mean_column(summary, 'flip_rate'),
+            'mean_confidence_drop': cls._mean_column(feature_attacks, 'confidence_drop_mean'),
+            'mean_rank_stability': cls._mean_column(summary, 'mean_rank_stability'),
+            'mean_feature_resilience_score': cls._mean_column(feature_resilience, 'frs'),
+        }
+
+    @staticmethod
+    def _sorted_unique(frame: pd.DataFrame, column: str) -> List[Any]:
+        if column not in frame:
+            return []
+        values = frame[column].dropna().unique().tolist()
+        return sorted(values)
+
+    @staticmethod
+    def _sum_column(frame: pd.DataFrame, column: str) -> int:
+        if column not in frame or frame.empty:
+            return 0
+        return int(frame[column].fillna(0).sum())
+
+    @staticmethod
+    def _mean_column(frame: pd.DataFrame, column: str) -> Optional[float]:
+        if column not in frame or frame.empty:
+            return None
+        value = frame[column].dropna().mean()
+        if pd.isna(value):
+            return None
+        return float(value)
+
+    @staticmethod
+    def _json_default(value: Any) -> Any:
+        if pd.isna(value):
+            return None
+        if hasattr(value, 'item'):
+            return value.item()
+        raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
