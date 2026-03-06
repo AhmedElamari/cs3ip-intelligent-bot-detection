@@ -18,6 +18,7 @@ from benchmarking import ModelBenchmark
 from benchmarking.data_prep import load_data, prepare_data
 from benchmarking.model_factory import create_models
 from benchmarking.output_utils import save_comparison_outputs, save_final_outputs
+from benchmarking.robustness import run_robustness_analysis
 from benchmarking.xai_reporting import run_explainability_analysis
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -85,6 +86,24 @@ def main():
         action='store_true',
         help='Skip McNemar paired test in pairwise significance output'
     )
+    parser.add_argument(
+        '--robustness-analysis',
+        action='store_true',
+        help='Run optional cost-aware adversarial robustness analysis'
+    )
+    parser.add_argument(
+        '--robustness-profiles',
+        type=str,
+        nargs='+',
+        default=None,
+        help='Override robustness profiles (e.g. cheap_only realistic_mixed)'
+    )
+    parser.add_argument(
+        '--robustness-max-shap-samples',
+        type=int,
+        default=None,
+        help='Override SHAP sample cap for robustness analysis'
+    )
     args = parser.parse_args()
 
     if args.config:
@@ -99,6 +118,12 @@ def main():
         config.set('preprocessing.scale_features', True)
     if args.save_plots or args.explain:
         config.set('output.save_plots', True)
+    if args.robustness_analysis:
+        config.set('robustness.enabled', True)
+    if args.robustness_profiles:
+        config.set('robustness.profiles', args.robustness_profiles)
+    if args.robustness_max_shap_samples is not None:
+        config.set('robustness.max_shap_samples', args.robustness_max_shap_samples)
     if args.models:
         known_models = set(config.get('models', {}).keys())
         unknown = [m for m in args.models if m not in known_models]
@@ -174,6 +199,14 @@ def main():
             xai_results['feature_importance'].to_csv(
                 output_dir / 'feature_importance_comparison.csv'
             )
+
+    if config.get('robustness.enabled'):
+        run_robustness_analysis(
+            benchmark,
+            feature_names,
+            config,
+            output_dir,
+        )
 
     save_final_outputs(benchmark, output_dir, config)
 

@@ -14,6 +14,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
+- Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop, SHAP stability, pivot tracking, and feature resilience scoring
 
 ## Project Structure
 ```
@@ -83,6 +84,10 @@ Run a benchmark with explainability:
 ```bash
 python run_benchmark.py --explain --save-plots
 ```
+Run the optional robustness audit:
+```bash
+python run_benchmark.py --models random_forest xgboost --explain --robustness-analysis --save-plots
+```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt`
@@ -90,6 +95,13 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
+
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` â€” profile-level attack metrics
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` â€” per-feature attack metrics
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_rank_stability.csv` â€” SHAP stability rows when available
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_resilience_scores.csv` â€” FRS values when SHAP succeeds
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_pivot_features.csv` â€” features that gain or lose explanatory prominence
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` â€” machine-readable robustness summary
 
 ### Single Model Pipeline
 ```bash
@@ -111,6 +123,9 @@ Options:
 - `--config`: load YAML or JSON config
 - `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost tabnet`)
 - `--smote` / `--scale`: override preprocessing settings
+- `--robustness-analysis`: enable the optional adversarial robustness audit
+- `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
+- `--robustness-max-shap-samples`: cap SHAP rows used during robustness analysis
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
@@ -123,7 +138,7 @@ result = optimize_tabnet(X_train, y_train, X_val, y_val, n_trials=50, output_pat
 The best params are saved as a validated `HPOResultV1` JSON artifact and can be loaded back via `load_hpo_result("results/hpo.json")`.
 
 ## Configuration
-Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, and explainability settings.
+Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, explainability settings, and the optional `robustness.*` controls.
 
 ## Data Notes
 - The pipeline expects TwiBot-20 JSON with labels embedded in the data.
