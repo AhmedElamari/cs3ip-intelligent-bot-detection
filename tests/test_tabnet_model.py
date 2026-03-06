@@ -143,6 +143,12 @@ class SampleWeightsTest(unittest.TestCase):
         w = _sample_weights(y, {0: 1.0, 1: 3.0})
         self.assertListEqual(w.tolist(), [1.0, 3.0, 3.0])
 
+    def test_dict_weight_missing_label_raises(self):
+        from models.tabnet import _sample_weights
+        with self.assertRaises(ValueError) as ctx:
+            _sample_weights(self.np.array([0, 1]), {1: 2.0})
+        self.assertIn("class_weight dict missing label(s): [0]", str(ctx.exception))
+
     def test_unsupported_spec_raises(self):
         from models.tabnet import _sample_weights
         with self.assertRaises(ValueError):
@@ -215,6 +221,34 @@ class TabNetModelTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             TabNetModel().predict(self.X)
 
+    def test_save_metadata_excludes_model(self):
+        import pickle
+        import tempfile
+
+        model = self._make_fitted()
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp_dir:
+            path = Path(tmp_dir) / "tabnet_model.pkl"
+            model.save(str(path))
+
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+            self.assertNotIn("model", data)
+            self.assertEqual(data["feature_names"], model.feature_names)
+            self.assertIsNotNone(data.get("tabnet_path"))
+
+    def test_load_restores_from_tabnet_path(self):
+        import tempfile
+        from models.tabnet import TabNetModel
+
+        model = self._make_fitted()
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp_dir:
+            path = Path(tmp_dir) / "tabnet_model.pkl"
+            model.save(str(path))
+
+            loaded = TabNetModel.load(str(path), trusted_source=True)
+            self.assertTrue(loaded.is_fitted)
+            self.assertEqual(loaded.feature_names, model.feature_names)
+
 
 SHAP_AVAILABLE = importlib.util.find_spec("shap") is not None
 
@@ -251,7 +285,7 @@ class TabNetSHAPIntegrationTest(unittest.TestCase):
         self.assertEqual(set(importance.keys()), {f"f{i}" for i in range(4)})
 
 
-@unittest.skipUnless(not TABNET_AVAILABLE, "pytorch-tabnet IS installed — skip dep-guard test")
+@unittest.skipUnless(not TABNET_AVAILABLE, "pytorch-tabnet IS installed - skip dep-guard test")
 class TabNetDependencyGuardTest(unittest.TestCase):
     """Verify ImportError is raised with install instructions when deps missing."""
 
@@ -261,6 +295,28 @@ class TabNetDependencyGuardTest(unittest.TestCase):
             _require_tabnet()
         self.assertIn("requirements-dl.txt", str(ctx.exception))
 
+
+class TabNetLegacyLoadTest(unittest.TestCase):
+    def test_load_falls_back_to_legacy_pickle(self):
+        import pickle
+        import tempfile
+        from models.tabnet import TabNetModel
+
+        payload = {
+            "name": "TabNet",
+            "feature_names": ["f0"],
+            "params": {},
+            "training_time": 0.0,
+            "model": "legacy-model",
+        }
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp_dir:
+            path = Path(tmp_dir) / "legacy_tabnet.pkl"
+            with open(path, "wb") as f:
+                pickle.dump(payload, f)
+
+            loaded = TabNetModel.load(str(path), trusted_source=True)
+            self.assertEqual(loaded.model, "legacy-model")
 
 if __name__ == "__main__":
     unittest.main()

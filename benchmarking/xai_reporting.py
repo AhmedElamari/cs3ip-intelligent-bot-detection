@@ -15,13 +15,11 @@ from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyz
 
 def run_explainability_analysis(
     benchmark: Any,
-    X_train: np.ndarray,
-    X_test: np.ndarray,
     feature_names: list,
     config: Config,
     output_dir: Path
 ) -> dict:
-    """Run XAI analysis (feature importance, SHAP, LIME) on trained benchmark models."""
+    """Run XAI analysis (feature importance, SHAP, LIME) using model-specific prepared inputs."""
     print("\n" + "=" * 60)
     print("EXPLAINABILITY ANALYSIS (XAI)")
     print("=" * 60)
@@ -79,20 +77,21 @@ def run_explainability_analysis(
             if model_name not in benchmark.results:
                 continue
 
+            X_train_m, _, X_test_m = benchmark.get_prepared_inputs(model_name)
             model = benchmark.results[model_name]['model']
             print(f"\nAnalyzing {model_name} with SHAP...")
 
             try:
                 shap_explainer = SHAPExplainer(model, feature_names)
                 max_samples = config.get('explainability.shap.max_samples', 100)
-                shap_explainer.fit(X_train, max_samples=max_samples)
+                shap_explainer.fit(X_train_m, max_samples=max_samples)
 
-                if len(X_test) == 0:
+                if len(X_test_m) == 0:
                     print("No test samples available for SHAP explanations.")
                     continue
 
                 # Explain test set
-                shap_explainer.explain(X_test[:min(50, len(X_test))])
+                shap_explainer.explain(X_test_m[:min(50, len(X_test_m))])
                 global_shap_values = shap_explainer.shap_values
 
                 # Get global importance from SHAP
@@ -106,14 +105,14 @@ def run_explainability_analysis(
                 for feat, imp in sorted_shap:
                     print(f"  {feat}: {imp:.4f}")
 
-                if len(X_test) > 0:
+                if len(X_test_m) > 0:
                     print(f"\nExample SHAP explanations for {model_name}:")
-                    n_explain = min(2, len(X_test))
+                    n_explain = min(2, len(X_test_m))
                     for i in range(n_explain):
-                        if isinstance(X_test, pd.DataFrame):
-                            instance = X_test.iloc[i:i + 1]
+                        if isinstance(X_test_m, pd.DataFrame):
+                            instance = X_test_m.iloc[i:i + 1]
                         else:
-                            instance = X_test[i:i + 1]
+                            instance = X_test_m[i:i + 1]
                         pred = model.predict(instance)[0]
                         pred_label = "Bot" if pred == 1 else "Human"
                         try:
@@ -146,7 +145,7 @@ def run_explainability_analysis(
                 # Save SHAP summary plot
                 if config.get('output.save_plots'):
                     try:
-                        fig = shap_explainer.plot_summary(X_test[:min(50, len(X_test))], max_display=10)
+                        fig = shap_explainer.plot_summary(X_test_m[:min(50, len(X_test_m))], max_display=10)
                         fig.savefig(output_dir / f'shap_summary_{model_name}.png', dpi=150, bbox_inches='tight')
                         plt.close(fig)
                     except Exception as e:
@@ -168,18 +167,19 @@ def run_explainability_analysis(
         print(f"\nExplaining predictions from best model: {best_name}")
 
         try:
+            X_train_m, _, X_test_m = benchmark.get_prepared_inputs(best_name)
             lime_explainer = LIMEExplainer(best_model, feature_names)
-            lime_explainer.fit(X_train)
+            lime_explainer.fit(X_train_m)
 
             # Explain a few test instances
-            n_explain = min(3, len(X_test))
+            n_explain = min(3, len(X_test_m))
             if n_explain == 0:
                 print("No test samples available for LIME explanations.")
             for i in range(n_explain):
-                if isinstance(X_test, pd.DataFrame):
-                    instance = X_test.iloc[i].to_numpy()
+                if isinstance(X_test_m, pd.DataFrame):
+                    instance = X_test_m.iloc[i].to_numpy()
                 else:
-                    instance = X_test[i]
+                    instance = X_test_m[i]
                 explanation = lime_explainer.explain_instance(
                     instance,
                     num_features=config.get('explainability.lime.num_features', 10)

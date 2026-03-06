@@ -111,13 +111,14 @@ def main():
             config.set(f'models.{model_name}.enabled', model_name in args.models)
 
     enabled_models = config.get_enabled_models()
-    if (
-        not config.get('preprocessing.scale_features')
-        and any(name in enabled_models for name in ('logistic_regression', 'svm'))
-    ):
+    scale_from_config = config.get('preprocessing.scale_features')
+    scaled_models = {'logistic_regression', 'svm'}
+    needs_scaling = any(m in enabled_models for m in scaled_models)
+    if not scale_from_config and needs_scaling:
+        config.set('preprocessing.scale_features', True)
         print(
-            "\nFeature scaling is disabled by config; "
-            "logistic_regression/svm will run without scaling."
+            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm enabled; "
+            "auto-restoring scaling for those models."
         )
 
     output_dir = Path(args.output)
@@ -164,7 +165,6 @@ def main():
     if args.explain or config.get('explainability.enabled'):
         xai_results = run_explainability_analysis(
             benchmark,
-            X_train, X_test,
             feature_names,
             config,
             output_dir

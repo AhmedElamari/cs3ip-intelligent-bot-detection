@@ -415,5 +415,131 @@ class TabNetStatisticsSmokeTest(unittest.TestCase):
         self.assertFalse(sig_df.empty, "Pairwise significance must not be empty.")
 
 
+@unittest.skipUnless(
+    SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE,
+    "sklearn/numpy/pandas not installed"
+)
+class ScalingBackwardCompatTest(unittest.TestCase):
+    """LR/SVM receive scaled inputs when enable_scaling=True; backward compat restored by run_benchmark."""
+
+    def test_lr_receives_scaled_inputs_when_enable_scaling_true(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+        import numpy as np
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='scaling_lr')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+        X_tr, _, _ = benchmark.get_prepared_inputs('logistic_regression')
+        # Scaled data has ~0 mean; non-constant columns have ~1 std (constant cols → std 0)
+        col_means = np.mean(X_tr, axis=0)
+        col_stds = np.std(X_tr, axis=0)
+        np.testing.assert_allclose(col_means, 0, atol=1e-5)
+        nonconst = col_stds > 0.1
+        np.testing.assert_allclose(col_stds[nonconst], 1, atol=1e-5)
+
+    def test_rf_receives_raw_inputs_when_enable_scaling_false(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+        import numpy as np
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'random_forest')
+        config.set('preprocessing.scale_features', False)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='scaling_rf')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=False,
+        )
+        X_tr, _, _ = benchmark.get_prepared_inputs('random_forest')
+        np.testing.assert_array_almost_equal(X_tr, X_train)
+
+
+@unittest.skipUnless(
+    SKLEARN_AVAILABLE and NUMPY_AVAILABLE and PANDAS_AVAILABLE,
+    "sklearn/numpy/pandas not installed"
+)
+class XAIPreparedInputsContractTest(unittest.TestCase):
+    """XAI uses model-specific prepared inputs from benchmark.get_prepared_inputs()."""
+
+    def test_get_prepared_inputs_returns_stored_arrays(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+        import numpy as np
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name in ('logistic_regression', 'random_forest'))
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='xai_contract')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+        X_tr_lr, X_val_lr, X_te_lr = benchmark.get_prepared_inputs('logistic_regression')
+        X_tr_rf, X_val_rf, X_te_rf = benchmark.get_prepared_inputs('random_forest')
+        # LR gets scaled; RF gets raw
+        np.testing.assert_allclose(np.mean(X_tr_lr, axis=0), 0, atol=1e-5)
+        np.testing.assert_array_almost_equal(X_tr_rf, X_train)
+
+    def test_run_explainability_analysis_uses_prepared_inputs(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from benchmarking.xai_reporting import run_explainability_analysis
+        from config import Config
+        from pathlib import Path
+        import tempfile
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+        config.set('preprocessing.scale_features', True)
+        config.set('explainability.shap.enabled', False)
+        config.set('explainability.feature_importance.enabled', False)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        models = create_models(config)
+        benchmark = ModelBenchmark(models=models, experiment_name='xai_prepared')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=False, enable_scaling=True,
+        )
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            out = Path(tmp)
+            results = run_explainability_analysis(benchmark, feature_names, config, out)
+        self.assertIn('lime_explanations', results)
+
+
 if __name__ == '__main__':
     unittest.main()
