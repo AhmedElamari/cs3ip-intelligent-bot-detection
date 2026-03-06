@@ -72,6 +72,7 @@ class BenchmarkSmokeTest(unittest.TestCase):
             X_train, y_train, X_val, y_val, X_test, y_test,
             feature_names=feature_names, verbose=False,
             compute_statistics=False,
+            enable_scaling=True,
         )
 
         self.assertIn('logistic_regression', results)
@@ -126,6 +127,7 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
             compute_statistics=True,
             statistics_bootstrap_samples=100,
             statistics_metrics=['f1'],
+            enable_scaling=True,
         )
         return benchmark
 
@@ -218,7 +220,8 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         benchmark = ModelBenchmark(models=models, experiment_name='stats_skip_smoke')
         benchmark.run_benchmark(
             X_train, y_train, X_val, y_val, X_test, y_test,
-            feature_names=feature_names, verbose=False, compute_statistics=False
+            feature_names=feature_names, verbose=False, compute_statistics=False,
+            enable_scaling=True,
         )
         self.assertTrue(benchmark.get_confidence_intervals().empty)
         self.assertTrue(benchmark.get_pairwise_significance().empty)
@@ -405,6 +408,7 @@ class TabNetStatisticsSmokeTest(unittest.TestCase):
             compute_statistics=True,
             statistics_bootstrap_samples=50,
             statistics_metrics=['f1'],
+            enable_scaling=True,
         )
 
         ci_df = benchmark.get_confidence_intervals()

@@ -53,6 +53,7 @@ def train_and_evaluate(
         y_test: Test labels.
         model_type: Model identifier ('random_forest', 'logistic_regression', 'svm', 'tabnet').
         class_weights: Optional class weight mapping for imbalance handling.
+        feature_names: Optional feature names for TabNet; falls back to meta.feature_names if None.
 
     Returns:
         Dictionary with the fitted model plus validation and test metrics.

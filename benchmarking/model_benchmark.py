@@ -53,7 +53,7 @@ class ModelBenchmark:
         statistics_alpha: float = 0.05,
         statistics_random_state: int = 2112,
         include_mcnemar: bool = True,
-        enable_scaling: bool = True,
+        enable_scaling: bool = False,
     ) -> Dict[str, Dict[str, Any]]:
         if verbose:
             print(f"\n{'='*60}")
