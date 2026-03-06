@@ -32,6 +32,12 @@ class ModelBenchmark:
         self.y_test: Optional[np.ndarray] = None
         self.confidence_intervals: Dict[str, Dict[str, Any]] = {}
         self.pairwise_significance: List[Dict[str, Any]] = []
+        self.base_train_inputs: Optional[Union[np.ndarray, pd.DataFrame]] = None
+        self.base_val_inputs: Optional[Union[np.ndarray, pd.DataFrame]] = None
+        self.base_test_inputs: Optional[Union[np.ndarray, pd.DataFrame]] = None
+        self.base_y_train: Optional[np.ndarray] = None
+        self.base_feature_names: List[str] = []
+        self.robustness_summary: Optional[pd.DataFrame] = None
 
     def add_model(self, name: str, model: Any) -> 'ModelBenchmark':
         self.models[name] = model
@@ -66,6 +72,11 @@ class ModelBenchmark:
 
         self.y_val = y_val
         self.y_test = y_test
+        self.base_train_inputs = X_train.copy() if hasattr(X_train, 'copy') else np.array(X_train, copy=True)
+        self.base_val_inputs = X_val.copy() if hasattr(X_val, 'copy') else np.array(X_val, copy=True)
+        self.base_test_inputs = X_test.copy() if hasattr(X_test, 'copy') else np.array(X_test, copy=True)
+        self.base_y_train = np.asarray(y_train)
+        self.base_feature_names = list(feature_names or [])
 
         scaled_models = {'logistic_regression', 'svm'}
 
@@ -75,7 +86,7 @@ class ModelBenchmark:
                 print(f"Training: {name}")
                 print(f"{'-'*40}")
 
-            X_train_model, X_val_model, X_test_model = self._prepare_model_inputs(
+            X_train_model, X_val_model, X_test_model, scaler = self._prepare_model_inputs(
                 model_name=name,
                 X_train=X_train,
                 X_val=X_val,
@@ -133,6 +144,11 @@ class ModelBenchmark:
                 'X_train': X_train_model,
                 'X_val': X_val_model,
                 'X_test': X_test_model,
+                'base_X_train': X_train.copy() if hasattr(X_train, 'copy') else np.array(X_train, copy=True),
+                'base_X_val': X_val.copy() if hasattr(X_val, 'copy') else np.array(X_val, copy=True),
+                'base_X_test': X_test.copy() if hasattr(X_test, 'copy') else np.array(X_test, copy=True),
+                'feature_names': list(feature_names or []),
+                'scaler': scaler,
             }
 
             if verbose:
@@ -337,6 +353,18 @@ class ModelBenchmark:
                 )
         return r['X_train'], r['X_val'], r['X_test']
 
+    def prepare_eval_inputs(
+        self,
+        model_name: str,
+        X_eval: Union[np.ndarray, pd.DataFrame],
+    ) -> Union[np.ndarray, pd.DataFrame]:
+        if model_name not in self.results:
+            raise KeyError(f"Model {model_name!r} not in benchmark results.")
+        scaler = self.results[model_name].get('scaler')
+        if scaler is None:
+            return X_eval.copy() if hasattr(X_eval, 'copy') else np.array(X_eval, copy=True)
+        return scaler.transform(X_eval)
+
     def get_feature_importance_comparison(self) -> pd.DataFrame:
         importance_data = {}
 
@@ -508,7 +536,7 @@ class ModelBenchmark:
         X_train_scaled = scaler.fit_transform(X_train)
         X_val_scaled = scaler.transform(X_val)
         X_test_scaled = scaler.transform(X_test)
-        return X_train_scaled, X_val_scaled, X_test_scaled
+        return X_train_scaled, X_val_scaled, X_test_scaled, scaler
 
     @classmethod
     def _prepare_model_inputs(
@@ -520,12 +548,12 @@ class ModelBenchmark:
         enable_scaling: bool,
         scaled_models: Set[str],
         verbose: bool,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any]:
         if enable_scaling and model_name in scaled_models:
             if verbose:
                 print("  (Applying feature scaling)")
             return cls._scale_features(X_train, X_val, X_test)
-        return X_train, X_val, X_test
+        return X_train, X_val, X_test, None
 
     def generate_report(self) -> str:
         lines = []
@@ -585,5 +613,21 @@ class ModelBenchmark:
                 ]
                 lines.append(f"\n  Metric: {m}")
                 lines.append(mdf.to_string(index=False))
+
+        if self.robustness_summary is not None and not self.robustness_summary.empty:
+            lines.append("\n## ADVERSARIAL ROBUSTNESS AUDIT")
+            cols = [
+                col for col in (
+                    'model',
+                    'profile',
+                    'attacked_true_bots',
+                    'baseline_detected_bots',
+                    'flip_rate',
+                    'confidence_drop_mean',
+                    'mean_rank_stability',
+                )
+                if col in self.robustness_summary.columns
+            ]
+            lines.append(self.robustness_summary[cols].to_string(index=False))
 
         return '\n'.join(lines)

@@ -1,0 +1,49 @@
+======================================================================
+BOT DETECTION MODEL BENCHMARK REPORT
+Experiment: benchmark_20260306_160812
+Generated: 2026-03-06 16:08:38
+======================================================================
+
+## SUMMARY
+Models evaluated: 1
+Best model (F1): random_forest (0.8511)
+
+## DETAILED RESULTS
+
+### random_forest
+Interpretable: False
+Training time: 0.88s
+
+Test Metrics:
+  accuracy: 0.8166
+  precision: 0.7589
+  recall: 0.9688
+  f1: 0.8511
+  specificity: 0.6372
+  false_positive_rate: 0.3628
+  false_negative_rate: 0.0312
+  balanced_accuracy: 0.8030
+  mcc: 0.6532
+  cohen_kappa: 0.6213
+  roc_auc: 0.8665
+  pr_auc: 0.8514
+  log_loss: 0.4028
+
+## TOP FEATURES (by average importance)
+                            random_forest   Average
+Feature                                            
+is_verified                      0.317091  0.317091
+followers_to_friends_ratio       0.140701  0.140701
+followers_count                  0.086157  0.086157
+listed_count                     0.085809  0.085809
+followers_per_day                0.080194  0.080194
+friends_count                    0.038677  0.038677
+account_age_days                 0.037334  0.037334
+statuses_count                   0.030616  0.030616
+description_length               0.029625  0.029625
+tweets_per_day                   0.027679  0.027679
+
+## ADVERSARIAL ROBUSTNESS AUDIT
+        model         profile  attacked_true_bots  baseline_detected_bots  flip_rate  confidence_drop_mean  mean_rank_stability
+random_forest      cheap_only                 640                     620   0.011290              0.020900             0.964852
+random_forest realistic_mixed                 640                     620   0.009677              0.023697             0.962696
