@@ -1,12 +1,12 @@
 """
 Bot Detection Benchmark Pipeline
 ================================
-Main script to run comprehensive model benchmarking with XAI analysis.
+CLI entry point for multi-model benchmarking with XAI analysis.
 
 Usage:
-    python benchmark.py
-    python benchmark.py --config config/config.yaml
-    python benchmark.py --explain --save-plots
+    python run_benchmark.py
+    python run_benchmark.py --config config/config.yaml
+    python run_benchmark.py --explain --save-plots
 """
 
 import argparse
@@ -24,13 +24,12 @@ REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 
 
-
 def main():
     parser = argparse.ArgumentParser(
         description='Bot Detection Model Benchmarking Pipeline (TwiBot-20 only)',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    
+
     parser.add_argument(
         '--config', '-c',
         type=str,
@@ -87,14 +86,12 @@ def main():
         help='Skip McNemar paired test in pairwise significance output'
     )
     args = parser.parse_args()
-    
-    # Load configuration
+
     if args.config:
         config = load_config(args.config)
     else:
         config = Config()
-    
-    # Override config with command line arguments
+
     if args.smote:
         config.set('preprocessing.handle_imbalance', True)
         config.set('preprocessing.imbalance_method', 'smote')
@@ -114,43 +111,41 @@ def main():
             config.set(f'models.{model_name}.enabled', model_name in args.models)
 
     enabled_models = config.get_enabled_models()
-    if (
-        not config.get('preprocessing.scale_features')
-        and any(name in enabled_models for name in ('logistic_regression', 'svm'))
-    ):
-        print("\nEnabling feature scaling for logistic_regression/svm...")
+    scale_from_config = config.get('preprocessing.scale_features')
+    scaled_models = {'logistic_regression', 'svm'}
+    needs_scaling = any(m in enabled_models for m in scaled_models)
+    if not scale_from_config and needs_scaling:
         config.set('preprocessing.scale_features', True)
-    
-    # Set up output directory
+        print(
+            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm enabled; "
+            "auto-restoring scaling for those models."
+        )
+
     output_dir = Path(args.output)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_dir = output_dir / f'benchmark_{timestamp}'
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     data_source_str = str(TWIBOT20_DATA_DIR)
-    
+
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
     print("="*60)
     print(f"Data:   {data_source_str}")
     print(f"Output: {output_dir}")
     print(f"Models: {config.get_enabled_models()}")
-    
-    # Load data
+
     data_splits = load_data(TWIBOT20_DATA_DIR)
-    
-    # Prepare data
+
     X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(data_splits, config)
-    
-    # Create models
+
     models = create_models(config)
-    
-    # Run benchmark
+
     benchmark = ModelBenchmark(
         models=models,
         experiment_name=f'benchmark_{timestamp}'
     )
-    
+
     benchmark.run_benchmark(
         X_train, y_train,
         X_val, y_val,
@@ -160,42 +155,38 @@ def main():
         compute_statistics=not args.skip_statistics,
         statistics_bootstrap_samples=args.statistics_bootstrap_samples,
         include_mcnemar=not args.skip_mcnemar,
+        enable_scaling=config.get('preprocessing.scale_features'),
     )
-    
-    # Print summary
+
     benchmark.print_summary()
-    
+
     save_comparison_outputs(benchmark, output_dir, config)
-    
-    # Run explainability analysis
+
     if args.explain or config.get('explainability.enabled'):
         xai_results = run_explainability_analysis(
             benchmark,
-            X_train, X_test,
             feature_names,
             config,
             output_dir
         )
-        
-        # Save feature importance comparison
+
         if 'feature_importance' in xai_results:
             xai_results['feature_importance'].to_csv(
                 output_dir / 'feature_importance_comparison.csv'
             )
-    
+
     save_final_outputs(benchmark, output_dir, config)
-    
+
     print("\n" + "="*60)
     print("BENCHMARK COMPLETE")
     print("="*60)
     print(f"Results saved to: {output_dir}")
-    
-    # Return best model info
+
     best_name, best_model, best_metrics = benchmark.get_best_model('f1')
     print(f"\n[BEST] Model: {best_name}")
     print(f"   F1 Score:  {best_metrics['f1']:.4f}")
     print(f"   ROC-AUC:   {best_metrics.get('roc_auc', 'N/A')}")
-    
+
     return benchmark
 
 

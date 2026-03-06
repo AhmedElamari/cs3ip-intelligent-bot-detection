@@ -91,6 +91,24 @@ class Config:
                     'class_weight': 'balanced',
                 }
             },
+            'tabnet': {
+                # Disabled by default: requires `pip install -r requirements-dl.txt`
+                'enabled': False,
+                'params': {
+                    'n_d': 32,
+                    'n_a': 32,
+                    'n_steps': 3,
+                    'gamma': 1.3,
+                    'lambda_sparse': 1e-3,
+                    'batch_size': 1024,
+                    'virtual_batch_size': 128,
+                    'momentum': 0.02,
+                    'mask_type': 'sparsemax',
+                    'max_epochs': 200,
+                    'patience': 20,
+                    'class_weight': 'balanced',
+                }
+            },
         },
         
         'explainability': {
@@ -355,6 +373,23 @@ models:
       colsample_bytree: 0.8
       reg_alpha: 0.0
       reg_lambda: 1.0
+      class_weight: balanced
+
+  tabnet:
+    # Requires: pip install -r requirements-dl.txt
+    enabled: false
+    params:
+      n_d: 32
+      n_a: 32
+      n_steps: 3
+      gamma: 1.3
+      lambda_sparse: 0.001
+      batch_size: 1024
+      virtual_batch_size: 128
+      momentum: 0.02
+      mask_type: sparsemax
+      max_epochs: 200
+      patience: 20
       class_weight: balanced
 
 explainability:

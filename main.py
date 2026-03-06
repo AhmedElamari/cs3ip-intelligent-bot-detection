@@ -176,7 +176,7 @@ def run_pipeline(
         print(f"After SMOTE: {len(X_train)} training samples")
     
     # Step 6: Feature scaling (recommended for logistic regression/SVM)
-    should_scale = use_scaling or model_type in ('logistic_regression', 'svm')
+    should_scale = (use_scaling or model_type in ('logistic_regression', 'svm')) and model_type != 'tabnet'
     if should_scale:
         if use_scaling:
             print("\nApplying feature scaling...")
@@ -190,17 +190,20 @@ def run_pipeline(
         X_train = detector.select_features(X_train, y_train, k=num_features)
         X_val = detector.apply_feature_selection(X_val)
         X_test = detector.apply_feature_selection(X_test)
+        feature_names = [feature_names[i] for i in detector.selected_features]
     
     # Step 8: Calculate class weights
     class_weights = detector.get_class_weights(y_train)
     print(f"\nClass weights: {class_weights}")
     
     # Step 9: Train and evaluate
+    live_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else feature_names
     results = train_and_evaluate(
         X_train, X_val, X_test,
         y_train, y_val, y_test,
         model_type=model_type,
-        class_weights=class_weights
+        class_weights=class_weights,
+        feature_names=live_names,
     )
     
     print("\n" + "=" * 60)
@@ -218,8 +221,8 @@ def main():
         '--model', '-m',
         type=str,
         default='random_forest',
-        choices=['random_forest', 'logistic_regression', 'svm'],
-        help='Model type to use'
+        choices=['random_forest', 'logistic_regression', 'svm', 'tabnet'],
+        help='Model type to use (tabnet requires: pip install -r requirements-dl.txt)'
     )
     parser.add_argument(
         '--smote',
