@@ -90,9 +90,12 @@ python run_benchmark.py --models random_forest xgboost --explain --robustness-an
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
-- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt`
+- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.md`
+- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt` (compatibility mirror)
 - `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
+- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 

@@ -188,17 +188,12 @@ def main():
     save_comparison_outputs(benchmark, output_dir, config)
 
     if args.explain or config.get('explainability.enabled'):
-        xai_results = run_explainability_analysis(
+        run_explainability_analysis(
             benchmark,
             feature_names,
             config,
             output_dir
         )
-
-        if 'feature_importance' in xai_results:
-            xai_results['feature_importance'].to_csv(
-                output_dir / 'feature_importance_comparison.csv'
-            )
 
     if config.get('robustness.enabled'):
         run_robustness_analysis(

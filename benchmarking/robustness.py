@@ -501,6 +501,7 @@ class RobustnessAnalyzer:
     def save_outputs(self, output_dir: Path, results: Dict[str, pd.DataFrame]) -> None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        sorted_results = self._sorted_results(results)
         file_map = {
             'summary': 'robustness_summary.csv',
             'feature_attacks': 'feature_attack_results.csv',
@@ -510,17 +511,17 @@ class RobustnessAnalyzer:
             'shap_diagnostics': 'shap_diagnostics.csv',
         }
         for key, filename in file_map.items():
-            results[key].to_csv(output_dir / filename, index=False)
+            sorted_results[key].to_csv(output_dir / filename, index=False)
 
         report = {
             'artifacts': {
-                key: self._artifact_manifest(filename, results[key])
+                key: self._artifact_manifest(filename, sorted_results[key])
                 for key, filename in file_map.items()
             },
-            'overview': self._report_overview(results),
+            'overview': self._report_overview(sorted_results),
         }
         with open(output_dir / 'robustness_report.json', 'w', encoding='utf-8') as handle:
-            json.dump(report, handle, default=self._json_default, separators=(',', ':'))
+            json.dump(report, handle, indent=2, default=self._json_default)
 
     @staticmethod
     def _artifact_manifest(filename: str, frame: pd.DataFrame) -> Dict[str, Any]:
@@ -577,3 +578,19 @@ class RobustnessAnalyzer:
         if hasattr(value, 'item'):
             return value.item()
         raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+    @staticmethod
+    def _sorted_results(results: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        sort_columns = {
+            'summary': ['model', 'profile'],
+            'feature_attacks': ['model', 'feature'],
+            'shap_rank_stability': ['model', 'scenario_type', 'scenario_name', 'row_index'],
+            'feature_resilience': ['model', 'feature'],
+            'shap_pivots': ['model', 'scenario_type', 'scenario_name', 'row_index'],
+            'shap_diagnostics': ['model', 'stage', 'status'],
+        }
+        sorted_results = {}
+        for key, frame in results.items():
+            columns = [column for column in sort_columns.get(key, []) if column in frame.columns]
+            sorted_results[key] = frame.sort_values(columns).reset_index(drop=True) if columns else frame.copy()
+        return sorted_results
