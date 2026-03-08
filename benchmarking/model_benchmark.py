@@ -509,7 +509,8 @@ class ModelBenchmark:
         ax.set_title("Model Training Times")
 
         for bar, value in zip(bars, plot_df["Training Time (s)"]):
-            ax.text(value + 0.01, bar.get_y() + bar.get_height() / 2, f"{value:.2f}s", va="center")
+            y_pos = bar.get_y() + bar.get_height() / 2
+            ax.text(value + 0.01, y_pos, f"{value:.2f}s", va="center")
 
         plt.tight_layout()
         return fig
@@ -655,7 +656,7 @@ class ModelBenchmark:
             lines.extend(
                 [
                     "",
-                    "## CONFIDENCE INTERVALS",
+                    "## Confidence Intervals",
                     "```text",
                     ci_df.sort_values(["model", "metric"]).to_string(index=False),
                     "```",
@@ -667,7 +668,7 @@ class ModelBenchmark:
             lines.extend(
                 [
                     "",
-                    "## PAIRWISE MODEL SIGNIFICANCE",
+                    "## Pairwise Model Significance",
                     "```text",
                     sig_df.sort_values(
                         [
