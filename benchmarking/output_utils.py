@@ -12,15 +12,7 @@ def _save_plot(fig, output_path: Path) -> None:
 
 
 def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save comparison table and plots for the benchmark pipeline."""
-    # Non-fatal: continue on I/O or table-generation failure so pipeline completes.
-    try:
-        comparison_df = benchmark.get_comparison_table()
-        comparison_df.to_csv(output_dir / 'model_comparison.csv', index=False)
-        print(f"\nSaved comparison table to {output_dir / 'model_comparison.csv'}")
-    except Exception as e:
-        print(f"Warning: Could not save comparison table: {e}")
-
+    """Save optional plots for the benchmark pipeline."""
     if not config.get('output.save_plots'):
         return
 
@@ -33,22 +25,15 @@ def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config:
 
 
 def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save benchmark results, report, and config."""
-    try:
-        benchmark.save_results(output_dir)
-    except Exception as e:
-        print(f"Warning: Could not save results: {e}")
+    """Save required benchmark artifacts; raise if any required write fails."""
+    benchmark.save_results(output_dir)
 
-    report_path = output_dir / 'benchmark_report.txt'
+    report_path_md = output_dir / 'benchmark_report.md'
+    report_path_txt = output_dir / 'benchmark_report.txt'
     config_path = output_dir / 'config.json'
-    try:
-        report = benchmark.generate_report()
-        report_path.write_text(report, encoding='utf-8')
-        print(f"Saved benchmark report to {report_path}")
-    except Exception as e:
-        print(f"Warning: Could not save benchmark report: {e}")
+    report = benchmark.generate_report()
+    report_path_md.write_text(report, encoding='utf-8')
+    report_path_txt.write_text(report, encoding='utf-8')
+    print(f"Saved benchmark report to {report_path_md}")
 
-    try:
-        config.to_json(config_path)
-    except Exception as e:
-        print(f"Warning: Could not save config: {e}")
+    config.to_json(config_path)

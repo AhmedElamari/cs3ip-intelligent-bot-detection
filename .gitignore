@@ -27,3 +27,4 @@ debug-*.log
 ./results_cli_control
 ./results_cli_check
 ./results_cli_control
+./Archive_results/
