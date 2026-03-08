@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .metrics import MetricsCalculator
+from .output_formatting import format_frame_for_export, format_payload_for_export
 
 
 DEFAULT_COMPARISON_METRICS = [
@@ -551,25 +552,25 @@ class ModelBenchmark:
         path = self._validate_output_path(path)
         path.mkdir(parents=True, exist_ok=True)
 
-        comparison_df = self.get_comparison_table()
+        comparison_df = self._export_dataframe(self.get_comparison_table())
         comparison_df.to_csv(path / "model_comparison.csv", index=False)
 
-        raw_fi_df = self.get_feature_importance_raw()
+        raw_fi_df = self._export_dataframe(self.get_feature_importance_raw())
         if not raw_fi_df.empty:
             raw_fi_df.to_csv(path / "feature_importance.csv")
 
-        normalized_fi_df = self.get_feature_importance_comparison()
+        normalized_fi_df = self._export_dataframe(self.get_feature_importance_comparison())
         if not normalized_fi_df.empty:
             normalized_fi_df.to_csv(path / "feature_importance_comparison.csv")
 
-        ci_df = self.get_confidence_intervals()
+        ci_df = self._export_dataframe(self.get_confidence_intervals())
         if not ci_df.empty:
             ci_df.sort_values(["model", "metric"]).to_csv(
                 path / "metric_confidence_intervals.csv",
                 index=False,
             )
 
-        sig_df = self.get_pairwise_significance()
+        sig_df = self._export_dataframe(self.get_pairwise_significance())
         if not sig_df.empty:
             sort_columns = [
                 column
@@ -582,7 +583,13 @@ class ModelBenchmark:
             )
 
         with open(path / "results.json", "w", encoding="utf-8") as handle:
-            json.dump(self._results_payload(), handle, indent=2, default=str)
+            json.dump(
+                format_payload_for_export(self._results_payload()),
+                handle,
+                indent=2,
+                default=str,
+                sort_keys=True,
+            )
 
         print(f"Results saved to {path}")
 
@@ -759,18 +766,11 @@ class ModelBenchmark:
 
     @staticmethod
     def _display_dataframe(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
-        if frame is None or frame.empty:
-            return frame
-        display_df = frame.copy()
-        numeric_columns = display_df.select_dtypes(include=["number"]).columns
-        for column in numeric_columns:
-            precision = 2 if column == "Training Time (s)" else 4
-            display_df[column] = display_df[column].map(
-                lambda value, p=precision: round(float(value), p)
-                if pd.notna(value)
-                else value
-            )
-        return display_df
+        return ModelBenchmark._export_dataframe(frame)
+
+    @staticmethod
+    def _export_dataframe(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+        return format_frame_for_export(frame)
 
     @staticmethod
     def _metric_key(dataset: str) -> str:

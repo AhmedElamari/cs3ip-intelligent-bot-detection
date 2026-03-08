@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 from benchmarking import ModelBenchmark
 from benchmarking.data_prep import prepare_data
 from benchmarking.model_factory import create_models
+from benchmarking.output_formatting import format_frame_for_export
 from config import Config
 from tests.test_benchmark_smoke import _make_synthetic_splits
 
@@ -57,7 +58,7 @@ class ResultsRepresentationContractTest(unittest.TestCase):
             benchmark.save_results(output_dir)
             comparison_df = pd.read_csv(output_dir / "model_comparison.csv")
 
-        expected = benchmark.get_comparison_table().set_index("Model")
+        expected = format_frame_for_export(benchmark.get_comparison_table()).set_index("Model")
         actual = comparison_df.set_index("Model")
         self.assertListEqual(expected.index.tolist(), actual.index.tolist())
         for model_name in expected.index:
@@ -84,6 +85,27 @@ class ResultsRepresentationContractTest(unittest.TestCase):
                 entry["test_metrics"]["f1"],
             )
             self.assertIn("confidence_intervals", entry)
+
+    def test_persisted_metrics_use_four_decimals_and_training_time_uses_two(self):
+        benchmark = self._build_benchmark(compute_statistics=True)
+
+        with TemporaryDirectory(dir=ROOT) as tmp_dir:
+            output_dir = Path(tmp_dir)
+            benchmark.save_results(output_dir)
+            comparison_text = (output_dir / "model_comparison.csv").read_text(encoding="utf-8")
+            results_json = json.loads((output_dir / "results.json").read_text(encoding="utf-8"))
+
+        self.assertRegex(comparison_text, r"\d+\.\d{4}")
+        self.assertRegex(comparison_text, r"\d+\.\d{2}(?:\r?\n|,)")
+        for model_name, payload in results_json["models"].items():
+            self.assertEqual(
+                round(benchmark.results[model_name]["training_time"], 2),
+                payload["training_time"],
+            )
+            self.assertEqual(
+                round(benchmark.results[model_name]["test_metrics"]["f1"], 4),
+                payload["test_metrics"]["f1"],
+            )
 
     def test_generate_report_uses_ranked_order_and_best_model(self):
         benchmark = self._build_benchmark(compute_statistics=True)
@@ -125,6 +147,16 @@ class ResultsRepresentationContractTest(unittest.TestCase):
             benchmark.save_results(output_dir)
             self.assertTrue((output_dir / "model_comparison.csv").exists())
             self.assertFalse((output_dir / "comparison.csv").exists())
+
+    def test_model_comparison_preserves_integer_rank_column(self):
+        benchmark = self._build_benchmark()
+
+        with TemporaryDirectory(dir=ROOT) as tmp_dir:
+            output_dir = Path(tmp_dir)
+            benchmark.save_results(output_dir)
+            comparison_df = pd.read_csv(output_dir / "model_comparison.csv")
+
+        self.assertTrue(pd.api.types.is_integer_dtype(comparison_df["Rank"]))
 
 
 if __name__ == "__main__":
