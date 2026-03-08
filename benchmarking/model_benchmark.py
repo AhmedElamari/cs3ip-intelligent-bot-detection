@@ -596,7 +596,6 @@ class ModelBenchmark:
 
     def generate_report(self) -> str:
         comparison_df = self._display_dataframe(self.get_comparison_table())
-        best_name, _, best_metrics = self.get_best_model("f1")
         lines = [
             "# Bot Detection Model Benchmark Report",
             "",
@@ -611,12 +610,23 @@ class ModelBenchmark:
             f"- Feature count: {len(self.base_feature_names)}",
             "",
             "## Summary",
-            f"- Best model by test F1: `{best_name}` ({best_metrics['f1']:.4f})",
-            "",
-            "```text",
-            comparison_df.to_string(index=False),
-            "```",
         ]
+
+        try:
+            best_name, _, best_metrics = self.get_best_model("f1")
+            lines.append(f"- Best model by test F1: `{best_name}` ({best_metrics['f1']:.4f})")
+        except (ValueError, KeyError):
+            lines.append("- No model results available.")
+
+        if comparison_df is not None and not comparison_df.empty:
+            lines.extend(
+                [
+                    "",
+                    "```text",
+                    comparison_df.to_string(index=False),
+                    "```",
+                ]
+            )
 
         lines.extend(self._metric_description_lines())
 

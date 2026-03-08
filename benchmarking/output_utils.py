@@ -25,13 +25,19 @@ def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config:
 
 
 def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save required benchmark artifacts; raise if any required write fails."""
+    """Save required benchmark artifacts; raise if any required write fails.
+
+    Generates all artifacts in memory before writing to avoid partial output on
+    disk if any step raises.
+    """
+    report = benchmark.generate_report()
+    config_snapshot = config.to_dict() if hasattr(config, 'to_dict') else None
+
     benchmark.save_results(output_dir)
 
     report_path_md = output_dir / 'benchmark_report.md'
     report_path_txt = output_dir / 'benchmark_report.txt'
     config_path = output_dir / 'config.json'
-    report = benchmark.generate_report()
     report_path_md.write_text(report, encoding='utf-8')
     report_path_txt.write_text(report, encoding='utf-8')
     print(f"Saved benchmark report to {report_path_md}")

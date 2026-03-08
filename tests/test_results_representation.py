@@ -158,6 +158,12 @@ class ResultsRepresentationContractTest(unittest.TestCase):
 
         self.assertTrue(pd.api.types.is_integer_dtype(comparison_df["Rank"]))
 
+    def test_generate_report_handles_empty_results_gracefully(self):
+        benchmark = ModelBenchmark(experiment_name="empty_test")
+        report = benchmark.generate_report()
+        self.assertIn("# Bot Detection Model Benchmark Report", report)
+        self.assertIn("No model results available", report)
+
 
 if __name__ == "__main__":
     unittest.main()
