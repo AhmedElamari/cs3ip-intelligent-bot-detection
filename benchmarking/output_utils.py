@@ -31,7 +31,6 @@ def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Conf
     disk if any step raises.
     """
     report = benchmark.generate_report()
-    config_snapshot = config.to_dict() if hasattr(config, 'to_dict') else None
 
     benchmark.save_results(output_dir)
 
