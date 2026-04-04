@@ -8,23 +8,16 @@ import numpy as np
 import pandas as pd
 
 
-_TIME_COLUMNS = {
-    "training_time",
-    "training_time_s",
-    "training_time_seconds",
-    "training time (s)",
-}
-_INTEGER_COLUMNS = {
-    "rank",
-    "rows",
-    "attacked_true_bots",
-    "baseline_detected_bots",
-    "flips_to_human",
-    "row_index",
-    "mcnemar_b",
-    "mcnemar_c",
-}
+_TIME_COLUMNS = frozenset(
+    map(str.strip, "training_time,training_time_s,training_time_seconds,training time (s)".split(","))
+)
 
+_INTEGER_COLUMNS = frozenset(
+    map(
+        str.strip,
+        "rank,rows,attacked_true_bots,baseline_detected_bots,flips_to_human,row_index,mcnemar_b,mcnemar_c".split(","),
+    )
+)
 
 def _normalize_name(name: Any) -> str:
     return str(name).strip().lower()
@@ -72,8 +65,8 @@ def format_frame_for_export(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFr
     return export_df
 
 
-def format_payload_for_export(value: Any, key: Optional[str] = None) -> Any:
-    """Recursively apply persisted-output precision to JSON-safe payloads."""
+def format_payload_for_export(value: Any, key: str | None = None) -> Any:
+    """Ensures exported payloads retain precision and types needed to avoid downstream data drift or type errors."""
     if isinstance(value, dict):
         return {
             item_key: format_payload_for_export(item_value, key=item_key)
