@@ -1,6 +1,6 @@
 """Benchmarking system for comparing multiple bot detection models."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 import json
 from pathlib import Path

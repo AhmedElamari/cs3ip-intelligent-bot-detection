@@ -10,8 +10,9 @@ Usage:
 """
 
 import argparse
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 from config import Config, load_config
 from benchmarking import ModelBenchmark
@@ -19,13 +20,14 @@ from benchmarking.data_prep import load_data, prepare_data
 from benchmarking.model_factory import create_models
 from benchmarking.output_utils import save_comparison_outputs, save_final_outputs
 from benchmarking.robustness import run_robustness_analysis
+from benchmarking.run_metadata import BenchmarkRunContext
 from benchmarking.xai_reporting import run_explainability_analysis
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
 
 
-def main():
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Bot Detection Model Benchmarking Pipeline (TwiBot-20 only)',
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -104,6 +106,32 @@ def main():
         default=None,
         help='Override SHAP sample cap for robustness analysis'
     )
+    return parser
+
+
+def _resolve_explainability_audit(args: argparse.Namespace, config: Config) -> dict:
+    requested_by_cli = bool(args.explain)
+    enabled_in_config = bool(config.get('explainability.enabled'))
+
+    if requested_by_cli and enabled_in_config:
+        effective_source = 'cli+config'
+    elif requested_by_cli:
+        effective_source = 'cli'
+    elif enabled_in_config:
+        effective_source = 'config'
+    else:
+        effective_source = 'disabled'
+
+    return {
+        'xai_enabled': requested_by_cli or enabled_in_config,
+        'xai_requested_by_cli': requested_by_cli,
+        'xai_enabled_in_config': enabled_in_config,
+        'xai_effective_source': effective_source,
+    }
+
+
+def main():
+    parser = _build_parser()
     args = parser.parse_args()
 
     if args.config:
@@ -160,6 +188,10 @@ def main():
     print(f"Output: {output_dir}")
     print(f"Models: {config.get_enabled_models()}")
 
+    explainability_audit = _resolve_explainability_audit(args, config)
+    state = "enabled" if explainability_audit['xai_enabled'] else "disabled"
+    print(f"Explainability: {state} (source: {explainability_audit['xai_effective_source']})")
+
     data_splits = load_data(TWIBOT20_DATA_DIR)
 
     X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(data_splits, config)
@@ -187,7 +219,7 @@ def main():
 
     save_comparison_outputs(benchmark, output_dir, config)
 
-    if args.explain or config.get('explainability.enabled'):
+    if explainability_audit['xai_enabled']:
         run_explainability_analysis(
             benchmark,
             feature_names,
@@ -203,14 +235,25 @@ def main():
             output_dir,
         )
 
-    save_final_outputs(benchmark, output_dir, config)
+    config_path = str(Path(args.config).resolve()) if args.config else None
+    run_context = BenchmarkRunContext(
+        argv=list(sys.argv[1:]),
+        args=vars(args).copy(),
+        config_path=config_path,
+        repo_root=REPO_ROOT,
+        data_dir=TWIBOT20_DATA_DIR,
+        output_dir=output_dir,
+        explainability=explainability_audit,
+    )
+
+    save_final_outputs(benchmark, output_dir, config, run_context)
 
     print("\n" + "="*60)
     print("BENCHMARK COMPLETE")
     print("="*60)
     print(f"Results saved to: {output_dir}")
 
-    best_name, best_model, best_metrics = benchmark.get_best_model('f1')
+    best_name, _, best_metrics = benchmark.get_best_model('f1')
     print(f"\n[BEST] Model: {best_name}")
     print(f"   F1 Score:  {best_metrics['f1']:.4f}")
     print(f"   ROC-AUC:   {best_metrics.get('roc_auc', 'N/A')}")

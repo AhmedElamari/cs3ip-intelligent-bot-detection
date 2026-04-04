@@ -1,8 +1,11 @@
 """Output helpers for the benchmark pipeline: comparison tables, plots, and final results."""
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+
 from config import Config
 from benchmarking import ModelBenchmark
+from benchmarking.run_metadata import BenchmarkRunContext, write_run_metadata
 
 
 def _save_plot(fig, output_path: Path) -> None:
@@ -24,21 +27,22 @@ def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config:
         print(f"Warning: Could not save plots: {e}")
 
 
-def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save required benchmark artifacts; raise if any required write fails.
-
-    Generates all artifacts in memory before writing to avoid partial output on
-    disk if any step raises.
-    """
-    report = benchmark.generate_report()
-
+def save_final_outputs(
+    benchmark: ModelBenchmark,
+    output_dir: Path,
+    config: Config,
+    run_context: BenchmarkRunContext,
+) -> None:
+    """Save required benchmark artifacts; raise if any required write fails."""
     benchmark.save_results(output_dir)
 
+    report = benchmark.generate_report()
     report_path_md = output_dir / 'benchmark_report.md'
-    report_path_txt = output_dir / 'benchmark_report.txt'
-    config_path = output_dir / 'config.json'
-    report_path_md.write_text(report, encoding='utf-8')
-    report_path_txt.write_text(report, encoding='utf-8')
+    for report_path in (report_path_md, output_dir / 'benchmark_report.txt'):
+        report_path.write_text(report, encoding='utf-8')
+
     print(f"Saved benchmark report to {report_path_md}")
 
-    config.to_json(config_path)
+    config.to_json(output_dir / 'config.json')
+    metadata_path = write_run_metadata(run_context)
+    print(f"Saved run metadata to {metadata_path}")
