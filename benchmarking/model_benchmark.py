@@ -1,5 +1,6 @@
 """Benchmarking system for comparing multiple bot detection models."""
 
+from dataclasses import dataclass
 from datetime import datetime
 import json
 from pathlib import Path
@@ -13,23 +14,17 @@ from .metrics import MetricsCalculator
 from .output_formatting import format_frame_for_export, format_payload_for_export
 
 
-DEFAULT_COMPARISON_METRICS = [
-    "accuracy",
-    "precision",
-    "recall",
-    "f1",
-    "roc_auc",
-    "mcc",
-]
-DEFAULT_STATISTICS_METRICS = [
-    "f1",
-    "roc_auc",
-    "pr_auc",
-    "mcc",
-    "balanced_accuracy",
-]
 
+DEFAULT_METRICS = {
+    "comparison": ["accuracy", "precision", "recall", "f1", "roc_auc", "mcc"],
+    "statistics": ["f1", "roc_auc", "pr_auc", "mcc", "balanced_accuracy"],
+}
 
+@dataclass
+class ModelBenchmarkConfig:
+    metrics: Dict[str, List[str]] = field(default_factory=lambda: DEFAULT_METRICS)
+
+@dataclass
 class ModelBenchmark:
     """Benchmark multiple bot detection models; compare metrics, generate reports and plots."""
 
@@ -210,7 +205,7 @@ class ModelBenchmark:
         if self.y_test is None:
             return
         if metrics is None:
-            metrics = list(DEFAULT_STATISTICS_METRICS)
+            metrics = DEFAULT_METRICS["statistics"]
 
         if verbose:
             print("\nComputing bootstrap confidence intervals...")
@@ -321,7 +316,7 @@ class ModelBenchmark:
         dataset: str = "test",
     ) -> pd.DataFrame:
         if metrics is None:
-            metrics = list(DEFAULT_COMPARISON_METRICS)
+            metrics = DEFAULT_METRICS["comparison"]
 
         ranked_results = self._ranked_result_items(sort_by=sort_by, dataset=dataset)
         rows = []

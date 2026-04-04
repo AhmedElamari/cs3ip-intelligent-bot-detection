@@ -137,12 +137,12 @@ def main():
 
     enabled_models = config.get_enabled_models()
     scale_from_config = config.get('preprocessing.scale_features')
-    scaled_models = {'logistic_regression', 'svm'}
+    scaled_models = {'logistic_regression', 'svm', 'tabnet'}
     needs_scaling = any(m in enabled_models for m in scaled_models)
     if not scale_from_config and needs_scaling:
         config.set('preprocessing.scale_features', True)
         print(
-            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm enabled; "
+            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm/tabnet enabled; "
             "auto-restoring scaling for those models."
         )
 
