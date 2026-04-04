@@ -504,7 +504,10 @@ class RobustnessAnalyzer:
                 'feature': primary_feature,
                 'importance_norm': importance_norm,
                 'stability': stability_mean,
-                'flip_rate': (int(flips_to_human) / baseline_detected_count) if baseline_detected_count else np.nan,
+                'flip_rate': (
+                    int(flips_to_human) / baseline_detected_count
+                    if baseline_detected_count else np.nan
+                ),
                 'frs': frs,
             }
 
@@ -617,7 +620,8 @@ class RobustnessAnalyzer:
         if array.size == 0:
             return np.nan
         mean = cls._stable_mean(array)
-        variance = math.fsum((value - mean) * (value - mean) for value in array.tolist()) / array.size
+        squared_diffs = ((value - mean) ** 2 for value in array.tolist())
+        variance = math.fsum(squared_diffs) / array.size
         return math.sqrt(variance)
 
     @classmethod
@@ -643,5 +647,8 @@ class RobustnessAnalyzer:
         sorted_results = {}
         for key, frame in results.items():
             columns = [column for column in sort_columns.get(key, []) if column in frame.columns]
-            sorted_results[key] = frame.sort_values(columns).reset_index(drop=True) if columns else frame.copy()
+            if columns:
+                sorted_results[key] = frame.sort_values(columns).reset_index(drop=True)
+            else:
+                sorted_results[key] = frame.copy()
         return sorted_results
