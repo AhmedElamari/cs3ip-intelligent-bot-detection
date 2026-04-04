@@ -504,7 +504,8 @@ class ModelBenchmark:
         ax.set_title("Model Training Times")
 
         for bar, value in zip(bars, plot_df["Training Time (s)"]):
-            ax.text(value + 0.01, bar.get_y() + bar.get_height() / 2, f"{value:.2f}s", va="center")
+            y_pos = bar.get_y() + bar.get_height() / 2
+            ax.text(value + 0.01, y_pos, f"{value:.2f}s", va="center")
 
         plt.tight_layout()
         return fig
@@ -590,7 +591,6 @@ class ModelBenchmark:
 
     def generate_report(self) -> str:
         comparison_df = self._display_dataframe(self.get_comparison_table())
-        best_name, _, best_metrics = self.get_best_model("f1")
         lines = [
             "# Bot Detection Model Benchmark Report",
             "",
@@ -605,12 +605,23 @@ class ModelBenchmark:
             f"- Feature count: {len(self.base_feature_names)}",
             "",
             "## Summary",
-            f"- Best model by test F1: `{best_name}` ({best_metrics['f1']:.4f})",
-            "",
-            "```text",
-            comparison_df.to_string(index=False),
-            "```",
         ]
+
+        try:
+            best_name, _, best_metrics = self.get_best_model("f1")
+            lines.append(f"- Best model by test F1: `{best_name}` ({best_metrics['f1']:.4f})")
+        except (ValueError, KeyError):
+            lines.append("- No model results available.")
+
+        if comparison_df is not None and not comparison_df.empty:
+            lines.extend(
+                [
+                    "",
+                    "```text",
+                    comparison_df.to_string(index=False),
+                    "```",
+                ]
+            )
 
         lines.extend(self._metric_description_lines())
 
@@ -650,7 +661,7 @@ class ModelBenchmark:
             lines.extend(
                 [
                     "",
-                    "## CONFIDENCE INTERVALS",
+                    "## Confidence Intervals",
                     "```text",
                     ci_df.sort_values(["model", "metric"]).to_string(index=False),
                     "```",
@@ -662,7 +673,7 @@ class ModelBenchmark:
             lines.extend(
                 [
                     "",
-                    "## PAIRWISE MODEL SIGNIFICANCE",
+                    "## Pairwise Model Significance",
                     "```text",
                     sig_df.sort_values(
                         [

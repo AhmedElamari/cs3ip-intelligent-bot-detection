@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -41,7 +41,7 @@ def _round_float(value: Any, precision: int) -> Any:
     return value
 
 
-def format_frame_for_export(frame: pd.DataFrame) -> pd.DataFrame:
+def format_frame_for_export(frame: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
     """Return a copy with persisted-output precision applied by column."""
     if frame is None or frame.empty:
         return frame
@@ -52,7 +52,7 @@ def format_frame_for_export(frame: pd.DataFrame) -> pd.DataFrame:
             series = export_df[column]
             if pd.api.types.is_numeric_dtype(series):
                 finite = series.dropna()
-                if finite.empty or np.allclose(finite, np.round(finite), atol=0.0):
+                if finite.empty or np.allclose(finite, np.round(finite), atol=0.0, rtol=0.0):
                     export_df[column] = series.round().astype("Int64")
             continue
 
