@@ -1,8 +1,11 @@
 """Output helpers for the benchmark pipeline: comparison tables, plots, and final results."""
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+
 from config import Config
 from benchmarking import ModelBenchmark
+from benchmarking.run_metadata import BenchmarkRunContext, write_run_metadata
 
 
 def _save_plot(fig, output_path: Path) -> None:
@@ -12,15 +15,7 @@ def _save_plot(fig, output_path: Path) -> None:
 
 
 def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save comparison table and plots for the benchmark pipeline."""
-    # Non-fatal: continue on I/O or table-generation failure so pipeline completes.
-    try:
-        comparison_df = benchmark.get_comparison_table()
-        comparison_df.to_csv(output_dir / 'model_comparison.csv', index=False)
-        print(f"\nSaved comparison table to {output_dir / 'model_comparison.csv'}")
-    except Exception as e:
-        print(f"Warning: Could not save comparison table: {e}")
-
+    """Save optional plots for the benchmark pipeline."""
     if not config.get('output.save_plots'):
         return
 
@@ -32,23 +27,22 @@ def save_comparison_outputs(benchmark: ModelBenchmark, output_dir: Path, config:
         print(f"Warning: Could not save plots: {e}")
 
 
-def save_final_outputs(benchmark: ModelBenchmark, output_dir: Path, config: Config) -> None:
-    """Save benchmark results, report, and config."""
-    try:
-        benchmark.save_results(output_dir)
-    except Exception as e:
-        print(f"Warning: Could not save results: {e}")
+def save_final_outputs(
+    benchmark: ModelBenchmark,
+    output_dir: Path,
+    config: Config,
+    run_context: BenchmarkRunContext,
+) -> None:
+    """Save required benchmark artifacts; raise if any required write fails."""
+    benchmark.save_results(output_dir)
 
-    report_path = output_dir / 'benchmark_report.txt'
-    config_path = output_dir / 'config.json'
-    try:
-        report = benchmark.generate_report()
+    report = benchmark.generate_report()
+    report_path_md = output_dir / 'benchmark_report.md'
+    for report_path in (report_path_md, output_dir / 'benchmark_report.txt'):
         report_path.write_text(report, encoding='utf-8')
-        print(f"Saved benchmark report to {report_path}")
-    except Exception as e:
-        print(f"Warning: Could not save benchmark report: {e}")
 
-    try:
-        config.to_json(config_path)
-    except Exception as e:
-        print(f"Warning: Could not save config: {e}")
+    print(f"Saved benchmark report to {report_path_md}")
+
+    config.to_json(output_dir / 'config.json')
+    metadata_path = write_run_metadata(run_context)
+    print(f"Saved run metadata to {metadata_path}")

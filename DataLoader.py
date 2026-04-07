@@ -92,11 +92,11 @@ class TwiBotDataLoader:
         """Normalize ID values for consistent comparisons."""
         return series.astype(str).str.strip()
 
+    # Normalises all different types of labels to be consistently 0 or 1.
     def _normalize_embedded_label(self, value) -> Optional[int]:
         """Normalize a single embedded label value (string/number) to 0/1."""
         if value is None or pd.isna(value):
             return None
-
         if isinstance(value, str):
             normalized = value.strip().lower()
             if normalized in ("0", "1"):
