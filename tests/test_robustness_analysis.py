@@ -56,7 +56,13 @@ def _make_splits():
 )
 class RobustnessAnalysisTest(unittest.TestCase):
 
-    def _build_benchmark(self, *, feature_selection=False, n_features=5):
+    def _build_benchmark(
+        self,
+        *,
+        feature_selection=False,
+        n_features=5,
+        enabled_models=("logistic_regression",),
+    ):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
@@ -65,7 +71,7 @@ class RobustnessAnalysisTest(unittest.TestCase):
         splits = _make_splits()
         config = Config()
         for name in config.get('models', {}).keys():
-            config.set(f'models.{name}.enabled', name == 'logistic_regression')
+            config.set(f'models.{name}.enabled', name in enabled_models)
         config.set('preprocessing.scale_features', True)
         config.set('preprocessing.feature_selection', feature_selection)
         config.set('preprocessing.n_features', n_features)
@@ -160,6 +166,147 @@ class RobustnessAnalysisTest(unittest.TestCase):
         self.assertEqual(len(results['summary']), summary_manifest['rows'])
         self.assertListEqual(list(results['summary'].columns), summary_manifest['columns'])
         self.assertEqual(['logistic_regression'], report['overview']['models'])
+
+    def test_save_outputs_sorts_frames_and_pretty_prints_json(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark(
+            enabled_models=("logistic_regression", "random_forest")
+        )
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            output_dir = Path(tmp)
+            results = analyzer.run()
+            analyzer.save_outputs(output_dir, results)
+            summary_df = pd.read_csv(output_dir / 'robustness_summary.csv')
+            feature_attacks_df = pd.read_csv(output_dir / 'feature_attack_results.csv')
+            json_text = (output_dir / 'robustness_report.json').read_text(encoding='utf-8')
+            report = json.loads(json_text)
+
+        from benchmarking.output_formatting import format_frame_for_export
+
+        expected_summary = format_frame_for_export(
+            results['summary'].sort_values(['model', 'profile']).reset_index(drop=True)
+        )
+        expected_feature_attacks = format_frame_for_export(
+            results['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True)
+        )
+        summary_df = summary_df.fillna('')
+        expected_summary = expected_summary.fillna('')
+        feature_attacks_df = feature_attacks_df.fillna('')
+        expected_feature_attacks = expected_feature_attacks.fillna('')
+
+        pd.testing.assert_frame_equal(summary_df, expected_summary, check_dtype=False)
+        pd.testing.assert_frame_equal(
+            feature_attacks_df,
+            expected_feature_attacks,
+            check_dtype=False,
+        )
+        self.assertIn('\n  "artifacts"', json_text)
+        self.assertEqual(sorted(summary_df['model'].dropna().unique().tolist()), report['overview']['models'])
+
+    def test_stable_reducers_ignore_input_order(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        values = np.array([0.1, 0.3, 0.2, 0.4, 0.5], dtype=np.float64)
+        reversed_values = values[::-1]
+
+        self.assertEqual(
+            RobustnessAnalyzer._stable_mean(values).hex(),
+            RobustnessAnalyzer._stable_mean(reversed_values).hex(),
+        )
+        self.assertEqual(
+            RobustnessAnalyzer._stable_std(values).hex(),
+            RobustnessAnalyzer._stable_std(reversed_values).hex(),
+        )
+        self.assertEqual(
+            RobustnessAnalyzer._stable_median(values).hex(),
+            RobustnessAnalyzer._stable_median(reversed_values).hex(),
+        )
+
+    def test_precision_policy_rounds_metrics_and_preserves_counts(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            output_dir = Path(tmp)
+            results = analyzer.run()
+            analyzer.save_outputs(output_dir, results)
+            summary_text = (output_dir / 'robustness_summary.csv').read_text(encoding='utf-8')
+            report = json.loads((output_dir / 'robustness_report.json').read_text(encoding='utf-8'))
+            summary_df = pd.read_csv(output_dir / 'robustness_summary.csv')
+
+        self.assertRegex(summary_text, r"\d+\.\d{4}")
+        self.assertTrue(pd.api.types.is_integer_dtype(summary_df['attacked_true_bots']))
+        self.assertTrue(pd.api.types.is_integer_dtype(summary_df['baseline_detected_bots']))
+        self.assertTrue(
+            all(
+                len(str(value).split('.')[-1]) <= 4
+                for value in report['overview'].values()
+                if isinstance(value, float)
+            )
+        )
+
+    def test_save_outputs_are_byte_stable(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark(
+            enabled_models=("logistic_regression", "random_forest")
+        )
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp_a, tempfile.TemporaryDirectory(dir=ROOT) as tmp_b:
+            results_a = analyzer.run()
+            analyzer.save_outputs(Path(tmp_a), results_a)
+            results_b = analyzer.run()
+            analyzer.save_outputs(Path(tmp_b), results_b)
+
+            for filename in (
+                'robustness_summary.csv',
+                'feature_attack_results.csv',
+                'robustness_report.json',
+            ):
+                self.assertEqual(
+                    (Path(tmp_a) / filename).read_text(encoding='utf-8'),
+                    (Path(tmp_b) / filename).read_text(encoding='utf-8'),
+                )
+
+    def test_robustness_metrics_ignore_equivalent_input_order(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark(
+            enabled_models=("logistic_regression", "random_forest")
+        )
+        config.set('robustness.enabled', True)
+        config.set('robustness.max_shap_samples', 2)
+
+        analyzer_a = RobustnessAnalyzer(benchmark, feature_names, config)
+        analyzer_b = RobustnessAnalyzer(benchmark, feature_names, config)
+        analyzer_b.base_test = analyzer_b.base_test.sample(frac=1, random_state=2112).reset_index(drop=True)
+        analyzer_b.y_test = analyzer_b.y_test[::-1]
+
+        results_a = analyzer_a.run()
+        results_b = analyzer_b.run()
+
+        pd.testing.assert_frame_equal(
+            results_a['summary'].sort_values(['model', 'profile']).reset_index(drop=True).fillna(''),
+            results_b['summary'].sort_values(['model', 'profile']).reset_index(drop=True).fillna(''),
+            check_dtype=False,
+        )
+        pd.testing.assert_frame_equal(
+            results_a['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True).fillna(''),
+            results_b['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True).fillna(''),
+            check_dtype=False,
+        )
 
     def test_shap_build_failures_are_recorded(self):
         from benchmarking.robustness import RobustnessAnalyzer

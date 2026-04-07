@@ -179,8 +179,8 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
     def test_generate_report_includes_ci_section(self):
         benchmark = self._run_lr_rf_benchmark()
         report = benchmark.generate_report()
-        self.assertIn('CONFIDENCE INTERVALS', report)
-        self.assertIn('PAIRWISE MODEL SIGNIFICANCE', report)
+        self.assertIn('Confidence Intervals', report)
+        self.assertIn('Pairwise Model Significance', report)
 
     def test_statistics_mcnemar_unavailable_when_scipy_absent(self):
         """Benchmark pairwise rows carry mcnemar_type='unavailable' when scipy is blocked.

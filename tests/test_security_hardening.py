@@ -103,7 +103,7 @@ class SecurityHardeningTest(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp_dir:
             benchmark.save_results(tmp_dir)
-            self.assertTrue((Path(tmp_dir) / "comparison.csv").exists())
+            self.assertTrue((Path(tmp_dir) / "model_comparison.csv").exists())
             self.assertTrue((Path(tmp_dir) / "results.json").exists())
 
 

@@ -90,9 +90,13 @@ python run_benchmark.py --models random_forest xgboost --explain --robustness-an
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
-- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt`
+- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.md`
+- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt` (compatibility mirror)
 - `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
+- `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` - runtime, dataset, package, git, and artifact provenance
+- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
@@ -118,6 +122,9 @@ Options:
 ```bash
 python run_benchmark.py --explain --save-plots
 ```
+
+Explainability runs when either `--explain` is passed or `explainability.enabled` is `true` in the loaded config.
+`--save-plots` forces plot saving on from the CLI, but plots can also be saved through `output.save_plots` in config.
 
 Options:
 - `--config`: load YAML or JSON config

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -11,6 +12,7 @@ import pandas as pd
 
 from adversarial import RealisticPerturbationEngine
 from explainability import FeatureResilienceAnalyzer, SHAPExplainer
+from .output_formatting import format_frame_for_export, format_payload_for_export
 
 
 SUPPORTED_SHAP_MODELS = {'random_forest', 'xgboost', 'tabnet'}
@@ -80,7 +82,11 @@ class RobustnessAnalyzer:
         diagnostic_rows: List[Dict[str, Any]] = []
 
         attacked_mask = self._attack_population_mask()
-        attacked_base = self.base_test.loc[attacked_mask].reset_index(drop=True)
+        attacked_base = (
+            self.base_test.loc[attacked_mask]
+            .sort_values(self.feature_names, kind='mergesort')
+            .reset_index(drop=True)
+        )
 
         for model_name, result in self.benchmark.results.items():
             model = result['model']
@@ -303,13 +309,15 @@ class RobustnessAnalyzer:
         confidence_drop = relevant_base_proba - relevant_proba
         non_flip_mask = relevant_preds == 1
         flips_to_human = int(np.sum(relevant_preds == 0))
-        non_flip_mean = float(np.mean(confidence_drop[non_flip_mask])) if np.any(non_flip_mask) else np.nan
+        non_flip_mean = (
+            self._stable_mean(confidence_drop[non_flip_mask]) if np.any(non_flip_mask) else np.nan
+        )
         return {
             'flips_to_human': flips_to_human,
             'flip_rate': flips_to_human / baseline_detected_count,
-            'confidence_drop_mean': float(np.mean(confidence_drop)),
-            'confidence_drop_median': float(np.median(confidence_drop)),
-            'confidence_drop_std': float(np.std(confidence_drop)),
+            'confidence_drop_mean': self._stable_mean(confidence_drop),
+            'confidence_drop_median': self._stable_median(confidence_drop),
+            'confidence_drop_std': self._stable_std(confidence_drop),
             'confidence_drop_non_flip_mean': non_flip_mean,
         }
 
@@ -469,7 +477,7 @@ class RobustnessAnalyzer:
                 )
 
         if mean_stability:
-            result['mean_rank_stability'] = float(np.mean(mean_stability))
+            result['mean_rank_stability'] = self._stable_mean(mean_stability)
 
         if feature_idx is not None:
             mutable_indices = [
@@ -478,12 +486,16 @@ class RobustnessAnalyzer:
                 if name in self.feature_names
             ]
             baseline_abs = np.abs(baseline_values)
-            feature_importance = float(np.mean(baseline_abs[:, feature_idx]))
-            max_importance = float(np.max(np.mean(baseline_abs[:, mutable_indices], axis=0))) if mutable_indices else feature_importance
+            feature_importance = self._stable_mean(baseline_abs[:, feature_idx])
+            mutable_means = [
+                self._stable_mean(baseline_abs[:, idx]) for idx in mutable_indices
+            ]
+            max_importance = max(mutable_means) if mutable_means else feature_importance
             importance_norm = feature_importance / max_importance if max_importance else np.nan
+            stability_mean = self._stable_mean(feature_stabilities) if feature_stabilities else np.nan
             frs = FeatureResilienceAnalyzer.compute_feature_resilience(
                 importance=importance_norm,
-                stability=float(np.mean(feature_stabilities)) if feature_stabilities else np.nan,
+                stability=stability_mean,
                 flips_to_human=int(flips_to_human) if not pd.isna(flips_to_human) else 0,
                 baseline_detected_bots=baseline_detected_count,
             )
@@ -491,8 +503,11 @@ class RobustnessAnalyzer:
                 'model': model_name,
                 'feature': primary_feature,
                 'importance_norm': importance_norm,
-                'stability': float(np.mean(feature_stabilities)) if feature_stabilities else np.nan,
-                'flip_rate': (int(flips_to_human) / baseline_detected_count) if baseline_detected_count else np.nan,
+                'stability': stability_mean,
+                'flip_rate': (
+                    int(flips_to_human) / baseline_detected_count
+                    if baseline_detected_count else np.nan
+                ),
                 'frs': frs,
             }
 
@@ -501,6 +516,7 @@ class RobustnessAnalyzer:
     def save_outputs(self, output_dir: Path, results: Dict[str, pd.DataFrame]) -> None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        sorted_results = self._sorted_results(results)
         file_map = {
             'summary': 'robustness_summary.csv',
             'feature_attacks': 'feature_attack_results.csv',
@@ -510,17 +526,23 @@ class RobustnessAnalyzer:
             'shap_diagnostics': 'shap_diagnostics.csv',
         }
         for key, filename in file_map.items():
-            results[key].to_csv(output_dir / filename, index=False)
+            format_frame_for_export(sorted_results[key]).to_csv(output_dir / filename, index=False)
 
         report = {
             'artifacts': {
-                key: self._artifact_manifest(filename, results[key])
+                key: self._artifact_manifest(filename, sorted_results[key])
                 for key, filename in file_map.items()
             },
-            'overview': self._report_overview(results),
+            'overview': self._report_overview(sorted_results),
         }
         with open(output_dir / 'robustness_report.json', 'w', encoding='utf-8') as handle:
-            json.dump(report, handle, default=self._json_default, separators=(',', ':'))
+            json.dump(
+                format_payload_for_export(report),
+                handle,
+                indent=2,
+                default=self._json_default,
+                sort_keys=True,
+            )
 
     @staticmethod
     def _artifact_manifest(filename: str, frame: pd.DataFrame) -> Dict[str, Any]:
@@ -565,10 +587,10 @@ class RobustnessAnalyzer:
     def _mean_column(frame: pd.DataFrame, column: str) -> Optional[float]:
         if column not in frame or frame.empty:
             return None
-        value = frame[column].dropna().mean()
-        if pd.isna(value):
+        values = frame[column].dropna().to_numpy(dtype=np.float64, copy=True)
+        if values.size == 0:
             return None
-        return float(value)
+        return RobustnessAnalyzer._stable_mean(values)
 
     @staticmethod
     def _json_default(value: Any) -> Any:
@@ -577,3 +599,56 @@ class RobustnessAnalyzer:
         if hasattr(value, 'item'):
             return value.item()
         raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
+
+    @staticmethod
+    def _stable_float_array(values: Any) -> np.ndarray:
+        array = np.asarray(values, dtype=np.float64).reshape(-1).copy()
+        if array.size == 0:
+            return array
+        return np.sort(array, kind='mergesort')
+
+    @classmethod
+    def _stable_mean(cls, values: Any) -> float:
+        array = cls._stable_float_array(values)
+        if array.size == 0:
+            return np.nan
+        return math.fsum(array.tolist()) / array.size
+
+    @classmethod
+    def _stable_std(cls, values: Any) -> float:
+        array = cls._stable_float_array(values)
+        if array.size == 0:
+            return np.nan
+        mean = cls._stable_mean(array)
+        squared_diffs = ((value - mean) ** 2 for value in array.tolist())
+        variance = math.fsum(squared_diffs) / array.size
+        return math.sqrt(variance)
+
+    @classmethod
+    def _stable_median(cls, values: Any) -> float:
+        array = cls._stable_float_array(values)
+        if array.size == 0:
+            return np.nan
+        middle = array.size // 2
+        if array.size % 2:
+            return float(array[middle])
+        return (float(array[middle - 1]) + float(array[middle])) / 2.0
+
+    @staticmethod
+    def _sorted_results(results: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+        sort_columns = {
+            'summary': ['model', 'profile'],
+            'feature_attacks': ['model', 'feature'],
+            'shap_rank_stability': ['model', 'scenario_type', 'scenario_name', 'row_index'],
+            'feature_resilience': ['model', 'feature'],
+            'shap_pivots': ['model', 'scenario_type', 'scenario_name', 'row_index'],
+            'shap_diagnostics': ['model', 'stage', 'status'],
+        }
+        sorted_results = {}
+        for key, frame in results.items():
+            columns = [column for column in sort_columns.get(key, []) if column in frame.columns]
+            if columns:
+                sorted_results[key] = frame.sort_values(columns).reset_index(drop=True)
+            else:
+                sorted_results[key] = frame.copy()
+        return sorted_results
