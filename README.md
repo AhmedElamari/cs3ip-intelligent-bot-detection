@@ -150,7 +150,7 @@ Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `
 ## Data Notes
 - The pipeline expects TwiBot-20 JSON with labels embedded in the data.
 - Split files under `data/` (train/dev/test) are required for runs.
-- Large datasets are intentionally not tracked in git; keep them local under `data/`.
+- Large datasets are intentionally not tracked in git; keeping them local under `data/`.
 - Account age uses a reference date derived from the training split to avoid leakage into validation/test distributions.
 - Numeric features are aligned to the actual training data columns (including tweet counts and related activity features).
 
