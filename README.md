@@ -95,7 +95,7 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
-- `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` â€” runtime, dataset, package, git, and artifact provenance
+- `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` - runtime, dataset, package, git, and artifact provenance
 - `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
