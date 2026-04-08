@@ -10,7 +10,8 @@ from .logistic_regression import LogisticRegressionModel
 from .svm import SVMModel
 from .decision_tree import DecisionTreeModel
 from .random_forest import RandomForestModel
-from .gradient_boosting import GradientBoostingModel
+from .xgboost import XGBoostModel
+from .tabnet import TabNetModel
 
 __all__ = [
     'BaseModel',
@@ -18,7 +19,8 @@ __all__ = [
     'SVMModel',
     'DecisionTreeModel',
     'RandomForestModel',
-    'GradientBoostingModel',
+    'XGBoostModel',
+    'TabNetModel',
 ]
 
 # Model registry for easy access
@@ -27,7 +29,8 @@ MODEL_REGISTRY = {
     'svm': SVMModel,
     'decision_tree': DecisionTreeModel,
     'random_forest': RandomForestModel,
-    'gradient_boosting': GradientBoostingModel,
+    'xgboost': XGBoostModel,
+    'tabnet': TabNetModel,
 }
 
 

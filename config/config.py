@@ -26,6 +26,7 @@ class Config:
         'random_state': 2112,
         'test_size': 0.1,
         'val_size': 0.2,
+        'time_split': False,  # Use chronological splitting to combat data drift
         
         'preprocessing': {
             'handle_imbalance': False,
@@ -77,16 +78,34 @@ class Config:
                     'oob_score': True,
                 }
             },
-            'gradient_boosting': {
+            'xgboost': {
                 'enabled': True,
                 'params': {
                     'n_estimators': 100,
                     'learning_rate': 0.1,
                     'max_depth': 5,
-                    'min_samples_split': 2,
-                    'min_samples_leaf': 1,
                     'subsample': 0.8,
-                    'max_features': 'sqrt',
+                    'colsample_bytree': 0.8,
+                    'reg_alpha': 0.0,
+                    'reg_lambda': 1.0,
+                    'class_weight': 'balanced',
+                }
+            },
+            'tabnet': {
+                # Disabled by default: requires `pip install -r requirements-dl.txt`
+                'enabled': False,
+                'params': {
+                    'n_d': 32,
+                    'n_a': 32,
+                    'n_steps': 3,
+                    'gamma': 1.3,
+                    'lambda_sparse': 1e-3,
+                    'batch_size': 1024,
+                    'virtual_batch_size': 128,
+                    'momentum': 0.02,
+                    'mask_type': 'sparsemax',
+                    'max_epochs': 200,
+                    'patience': 20,
                     'class_weight': 'balanced',
                 }
             },
@@ -107,6 +126,17 @@ class Config:
                 'enabled': True,
                 'methods': ['builtin', 'permutation'],
             },
+        },
+
+        'robustness': {
+            'enabled': False,
+            'attack_population': 'true_bots',
+            'profiles': ['cheap_only', 'realistic_mixed'],
+            'evaluate_single_feature_attacks': True,
+            'evaluate_bundle_attacks': True,
+            'shap_top_k': 5,
+            'max_shap_samples': 50,
+            'expensive_nudge_fraction': 0.05,
         },
         
         'output': {
@@ -299,6 +329,7 @@ CONFIG_TEMPLATE = """
 random_state: 2112
 test_size: 0.1
 val_size: 0.2
+time_split: false  # Use chronological splitting to combat data drift
 
 preprocessing:
   handle_imbalance: false
@@ -343,13 +374,33 @@ models:
       n_jobs: -1
       oob_score: true
 
-  gradient_boosting:
+  xgboost:
     enabled: true
     params:
       n_estimators: 100
       learning_rate: 0.1
       max_depth: 5
       subsample: 0.8
+      colsample_bytree: 0.8
+      reg_alpha: 0.0
+      reg_lambda: 1.0
+      class_weight: balanced
+
+  tabnet:
+    # Requires: pip install -r requirements-dl.txt
+    enabled: false
+    params:
+      n_d: 32
+      n_a: 32
+      n_steps: 3
+      gamma: 1.3
+      lambda_sparse: 0.001
+      batch_size: 1024
+      virtual_batch_size: 128
+      momentum: 0.02
+      mask_type: sparsemax
+      max_epochs: 200
+      patience: 20
       class_weight: balanced
 
 explainability:
@@ -366,6 +417,18 @@ explainability:
     methods:
       - builtin
       - permutation
+
+robustness:
+  enabled: false
+  attack_population: true_bots
+  profiles:
+    - cheap_only
+    - realistic_mixed
+  evaluate_single_feature_attacks: true
+  evaluate_bundle_attacks: true
+  shap_top_k: 5
+  max_shap_samples: 50
+  expensive_nudge_fraction: 0.05
 
 output:
   save_models: true
