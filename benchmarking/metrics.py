@@ -1,10 +1,6 @@
-"""
-Metrics Calculator
-==================
-Comprehensive metrics calculation for model evaluation.
-"""
+"""Metrics calculator: point estimates, bootstrap CIs, paired delta test, McNemar, Holm-Bonferroni."""
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
@@ -15,14 +11,7 @@ from sklearn.metrics import (
 
 
 class MetricsCalculator:
-    """
-    Comprehensive metrics calculator for bot detection evaluation.
-    
-    Computes a wide range of classification metrics including:
-        - Basic: Accuracy, Precision, Recall, F1
-        - Advanced: ROC-AUC, PR-AUC, MCC, Cohen's Kappa
-        - Threshold-independent: ROC curve, PR curve
-    """
+    """Metrics for bot detection: accuracy, F1, ROC-AUC, PR-AUC, MCC, bootstrap CIs, McNemar, Holm-Bonferroni."""
     
     METRIC_DESCRIPTIONS = {
         'accuracy': 'Overall correctness of predictions',
@@ -39,13 +28,27 @@ class MetricsCalculator:
     }
     
     def __init__(self, class_names: List[str] = None):
-        """
-        Initialize metrics calculator.
-        
-        Args:
-            class_names: Names for classes ['Human', 'Bot']
-        """
+        """Initialize with optional class names (default: Human, Bot)."""
         self.class_names = class_names or ['Human', 'Bot']
+
+    @staticmethod
+    def _positive_class_proba(y_proba: np.ndarray) -> np.ndarray:
+        """Return 1-D probabilities for the positive class."""
+        proba = np.asarray(y_proba)
+        return proba[:, 1] if proba.ndim > 1 else proba
+
+    @staticmethod
+    def _valid_bootstrap_samples(
+        rng: np.random.RandomState,
+        n: int,
+        n_bootstrap: int,
+        y_true: np.ndarray,
+    ):
+        """Yield bootstrap indices where both classes appear in the resample."""
+        for _ in range(n_bootstrap):
+            idx = rng.randint(0, n, n)
+            if len(np.unique(y_true[idx])) >= 2:
+                yield idx
     
     def compute_all_metrics(
         self,
@@ -53,17 +56,7 @@ class MetricsCalculator:
         y_pred: np.ndarray,
         y_proba: Optional[np.ndarray] = None
     ) -> Dict[str, float]:
-        """
-        Compute all available metrics.
-        
-        Args:
-            y_true: True labels
-            y_pred: Predicted labels
-            y_proba: Probability predictions (optional)
-            
-        Returns:
-            Dictionary of metric names to values
-        """
+        """Compute all available metrics for y_true, y_pred, and optional y_proba."""
         metrics = {}
         
         # Basic metrics
@@ -85,7 +78,7 @@ class MetricsCalculator:
         
         # Probability-based metrics
         if y_proba is not None:
-            proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+            proba = self._positive_class_proba(y_proba)
             try:
                 metrics['roc_auc'] = roc_auc_score(y_true, proba)
             except ValueError:
@@ -187,7 +180,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with fpr, tpr, thresholds
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         fpr, tpr, thresholds = roc_curve(y_true, proba)
         return {
             'fpr': fpr,
@@ -210,7 +203,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with precision, recall, thresholds
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         precision, recall, thresholds = precision_recall_curve(y_true, proba)
         return {
             'precision': precision,
@@ -235,7 +228,7 @@ class MetricsCalculator:
         Returns:
             Dictionary with optimal threshold and metric value
         """
-        proba = y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba
+        proba = self._positive_class_proba(y_proba)
         
         best_threshold = 0.5
         best_score = 0
@@ -324,7 +317,7 @@ class MetricsCalculator:
         import matplotlib.pyplot as plt
         
         roc_data = self.get_roc_curve(y_true, y_proba)
-        auc = roc_auc_score(y_true, y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba)
+        auc = roc_auc_score(y_true, self._positive_class_proba(y_proba))
         
         fig, ax = plt.subplots(figsize=figsize)
         ax.plot(roc_data['fpr'], roc_data['tpr'], 'b-', label=f'ROC (AUC = {auc:.3f})')
@@ -358,7 +351,7 @@ class MetricsCalculator:
         import matplotlib.pyplot as plt
         
         pr_data = self.get_precision_recall_curve(y_true, y_proba)
-        auc = average_precision_score(y_true, y_proba[:, 1] if len(y_proba.shape) > 1 else y_proba)
+        auc = average_precision_score(y_true, self._positive_class_proba(y_proba))
         
         fig, ax = plt.subplots(figsize=figsize)
         ax.plot(pr_data['recall'], pr_data['precision'], 'b-', label=f'PR (AUC = {auc:.3f})')
@@ -390,3 +383,261 @@ class MetricsCalculator:
             else:
                 lines.append(f"  {name}: {value}")
         return '\n'.join(lines)
+
+    # ------------------------------------------------------------------
+    # Statistical inference utilities
+    # ------------------------------------------------------------------
+
+    def _compute_metric(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_proba: Optional[np.ndarray],
+        metric: str,
+    ) -> float:
+        """Compute a single named metric on provided arrays."""
+        basic_metric_fns = {
+            'accuracy': accuracy_score,
+            'precision': lambda yt, yp: precision_score(yt, yp, average='binary', zero_division=0),
+            'recall': lambda yt, yp: recall_score(yt, yp, average='binary', zero_division=0),
+            'f1': lambda yt, yp: f1_score(yt, yp, average='binary', zero_division=0),
+            'balanced_accuracy': balanced_accuracy_score,
+            'mcc': matthews_corrcoef,
+        }
+        metric_fn = basic_metric_fns.get(metric)
+        if metric_fn is not None:
+            return metric_fn(y_true, y_pred)
+
+        if metric in ('roc_auc', 'pr_auc'):
+            if y_proba is None:
+                return float('nan')
+            proba = self._positive_class_proba(y_proba)
+            scorer = roc_auc_score if metric == 'roc_auc' else average_precision_score
+            try:
+                return scorer(y_true, proba)
+            except ValueError:
+                return float('nan')
+
+        raise ValueError(f"Unsupported metric for bootstrapping: {metric}")
+
+    def bootstrap_metric_ci(
+        self,
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        y_proba: Optional[np.ndarray] = None,
+        metric: str = 'f1',
+        n_bootstrap: int = 1000,
+        alpha: float = 0.05,
+        random_state: int = 2112,
+    ) -> Tuple[float, float, float]:
+        """
+        Compute a bootstrap percentile confidence interval for a single metric.
+
+        Args:
+            y_true: Ground-truth labels.
+            y_pred: Predicted labels.
+            y_proba: Predicted probabilities (optional; required for roc_auc/pr_auc).
+            metric: Metric name (f1, roc_auc, pr_auc, mcc, accuracy, …).
+            n_bootstrap: Number of bootstrap resamples.
+            alpha: Significance level; produces (alpha/2, 1-alpha/2) interval.
+            random_state: Seed for reproducibility.
+
+        Returns:
+            Tuple of (lower_bound, point_estimate, upper_bound).
+        """
+        rng = np.random.RandomState(random_state)
+        n = len(y_true)
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        if y_proba is not None:
+            y_proba = np.asarray(y_proba)
+
+        point = self._compute_metric(y_true, y_pred, y_proba, metric)
+
+        boot_scores = []
+        for idx in self._valid_bootstrap_samples(rng, n, n_bootstrap, y_true):
+            bt, bp = y_true[idx], y_pred[idx]
+            bpr = y_proba[idx] if y_proba is not None else None
+            score = self._compute_metric(bt, bp, bpr, metric)
+            if not np.isnan(score):
+                boot_scores.append(score)
+
+        if not boot_scores:
+            return (float('nan'), point, float('nan'))
+
+        lower = float(np.percentile(boot_scores, 100 * alpha / 2))
+        upper = float(np.percentile(boot_scores, 100 * (1 - alpha / 2)))
+        return (lower, point, upper)
+
+    def bootstrap_delta_ci(
+        self,
+        y_true: np.ndarray,
+        preds_a: np.ndarray,
+        preds_b: np.ndarray,
+        probas_a: Optional[np.ndarray] = None,
+        probas_b: Optional[np.ndarray] = None,
+        metric: str = 'f1',
+        n_bootstrap: int = 1000,
+        alpha: float = 0.05,
+        random_state: int = 2112,
+    ) -> Dict[str, float]:
+        """
+        Bootstrap-based paired comparison: CI for (metric_B - metric_A) and
+        a two-sided p-value estimate via the permutation principle.
+
+        Args:
+            y_true: Shared ground-truth labels.
+            preds_a: Predictions from model A.
+            preds_b: Predictions from model B.
+            probas_a: Probabilities from model A (optional).
+            probas_b: Probabilities from model B (optional).
+            metric: Metric name to compare.
+            n_bootstrap: Bootstrap resamples.
+            alpha: CI level.
+            random_state: Seed for reproducibility.
+
+        Returns:
+            Dict with keys: delta, ci_lower, ci_upper, p_value.
+        """
+        rng = np.random.RandomState(random_state)
+        n = len(y_true)
+        y_true = np.asarray(y_true)
+        preds_a = np.asarray(preds_a)
+        preds_b = np.asarray(preds_b)
+        if probas_a is not None:
+            probas_a = np.asarray(probas_a)
+        if probas_b is not None:
+            probas_b = np.asarray(probas_b)
+
+        score_a = self._compute_metric(y_true, preds_a, probas_a, metric)
+        score_b = self._compute_metric(y_true, preds_b, probas_b, metric)
+        observed_delta = score_b - score_a
+
+        boot_deltas = []
+        for idx in self._valid_bootstrap_samples(rng, n, n_bootstrap, y_true):
+            bt = y_true[idx]
+            bpra = probas_a[idx] if probas_a is not None else None
+            bprb = probas_b[idx] if probas_b is not None else None
+            sa = self._compute_metric(bt, preds_a[idx], bpra, metric)
+            sb = self._compute_metric(bt, preds_b[idx], bprb, metric)
+            if not (np.isnan(sa) or np.isnan(sb)):
+                boot_deltas.append(sb - sa)
+
+        if not boot_deltas:
+            return {'delta': observed_delta, 'ci_lower': float('nan'),
+                    'ci_upper': float('nan'), 'p_value': float('nan')}
+
+        boot_deltas = np.array(boot_deltas)
+        ci_lower = float(np.percentile(boot_deltas, 100 * alpha / 2))
+        ci_upper = float(np.percentile(boot_deltas, 100 * (1 - alpha / 2)))
+        # Two-sided p-value under null H0: delta == 0 (null-centered, not mean-centered).
+        # This avoids non-informative p-values when observed_delta is close to boot mean.
+        p_left = float(np.mean(boot_deltas <= 0.0))
+        p_right = float(np.mean(boot_deltas >= 0.0))
+        p_value = float(min(1.0, 2.0 * min(p_left, p_right)))
+        return {
+            'delta': observed_delta,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'p_value': p_value,
+        }
+
+    @staticmethod
+    def mcnemar_test(
+        y_true: np.ndarray,
+        preds_a: np.ndarray,
+        preds_b: np.ndarray,
+    ) -> Dict[str, float]:
+        """
+        McNemar's exact test for paired binary classifiers.
+
+        Compares the classification outcomes of model A vs model B on the
+        same test set.  The test statistic uses the exact binomial p-value
+        (no continuity correction) when b+c < 25, otherwise the asymptotic
+        chi-squared approximation.
+
+        Args:
+            y_true: Ground-truth binary labels (0/1).
+            preds_a: Binary predictions from model A.
+            preds_b: Binary predictions from model B.
+
+        Returns:
+            Dict with keys: b (A-right B-wrong), c (A-wrong B-right),
+            statistic, p_value, test_type.
+        """
+        y_true = np.asarray(y_true)
+        preds_a = np.asarray(preds_a)
+        preds_b = np.asarray(preds_b)
+
+        correct_a = (preds_a == y_true)
+        correct_b = (preds_b == y_true)
+
+        b = int(np.sum(correct_a & ~correct_b))   # A right, B wrong
+        c = int(np.sum(~correct_a & correct_b))    # A wrong, B right
+
+        if b + c == 0:
+            return {'b': b, 'c': c, 'statistic': 0.0, 'p_value': 1.0,
+                    'test_type': 'exact'}
+
+        try:
+            from scipy.stats import binom, chi2
+        except ImportError:
+            return {
+                'b': b,
+                'c': c,
+                'statistic': float('nan'),
+                'p_value': float('nan'),
+                'test_type': 'unavailable',
+            }
+
+        if b + c < 25:
+            # Exact binomial two-sided
+            p_value = float(min(1.0, 2 * min(
+                binom.cdf(min(b, c), b + c, 0.5),
+                1 - binom.cdf(min(b, c) - 1, b + c, 0.5),
+            )))
+            statistic = float(min(b, c))
+            test_type = 'exact'
+        else:
+            statistic = float((abs(b - c) - 1) ** 2 / (b + c))
+            p_value = float(1 - chi2.cdf(statistic, df=1))
+            test_type = 'chi2'
+
+        return {'b': b, 'c': c, 'statistic': statistic, 'p_value': p_value,
+                'test_type': test_type}
+
+    @staticmethod
+    def holm_bonferroni(p_values: List[float]) -> List[float]:
+        """
+        Apply Holm-Bonferroni step-down correction to a list of p-values.
+
+        Non-finite inputs (NaN, +/-inf) are excluded from the multiplicity
+        count and returned as NaN so they do not inflate corrections on
+        valid hypotheses.
+
+        Args:
+            p_values: Uncorrected p-values (may contain NaN or inf).
+
+        Returns:
+            Corrected p-values in the same order as input; non-finite
+            positions are set to NaN.
+        """
+        arr = np.asarray(p_values, dtype=float)
+        if arr.size == 0:
+            return []
+
+        out = np.full(arr.size, np.nan)
+        finite_mask = np.isfinite(arr)
+        if not np.any(finite_mask):
+            return out.tolist()
+
+        finite_idx = np.where(finite_mask)[0]
+        p = np.clip(arr[finite_mask], 0.0, 1.0)
+        m = p.size
+
+        order = np.argsort(p, kind='mergesort')
+        # Multiply by (m, m-1, …, 1) then take cumulative max to enforce
+        # monotonicity, then clip to [0, 1] (standard Holm step-down rule).
+        adjusted = np.minimum(1.0, np.maximum.accumulate(p[order] * np.arange(m, 0, -1)))
+        out[finite_idx[order]] = adjusted
+        return out.tolist()

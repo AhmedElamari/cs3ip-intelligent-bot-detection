@@ -1,11 +1,4 @@
-"""
-LIME Explainer
-==============
-Local Interpretable Model-agnostic Explanations.
-
-LIME explains individual predictions by learning a simple
-interpretable model locally around the prediction.
-"""
+"""LIME (Local Interpretable Model-agnostic Explanations) for individual predictions."""
 
 from typing import Any, Dict, List, Optional, Union, Callable
 import numpy as np
@@ -13,18 +6,7 @@ import pandas as pd
 
 
 class LIMEExplainer:
-    """
-    LIME-based model explainer for bot detection.
-    
-    LIME (Local Interpretable Model-agnostic Explanations) explains
-    predictions by approximating the model locally with an interpretable
-    model (like linear regression).
-    
-    Key concepts:
-        - Local fidelity: The explanation is faithful to the model near the instance
-        - Model-agnostic: Works with any classifier
-        - Interpretable: Uses simple, understandable explanations
-    """
+    """LIME-based explainer for bot detection; model-agnostic local explanations."""
     
     def __init__(
         self,
@@ -64,16 +46,7 @@ class LIMEExplainer:
             return predict_fn
     
     def fit(self, X: Union[np.ndarray, pd.DataFrame], mode: str = 'tabular') -> 'LIMEExplainer':
-        """
-        Fit the LIME explainer on training data.
-        
-        Args:
-            X: Training data for computing statistics
-            mode: Type of data ('tabular' for structured data)
-            
-        Returns:
-            self
-        """
+        """Fit LIME explainer on training data."""
         try:
             from lime import lime_tabular
         except ImportError:

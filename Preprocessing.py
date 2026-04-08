@@ -15,10 +15,9 @@ class BotDetector:
     def preprocess(self) -> pd.DataFrame:
         """Clean and preprocess data from TwiBot-20"""
         self.data = self.data.dropna(subset=['label'])
-        # Fill NaN values - use infer_objects() to avoid FutureWarning about downcasting
-        self.data = self.data.fillna(0).infer_objects(copy=False)
-        
-        #normalise the text fields
+        num_cols = self.data.select_dtypes(include='number').columns
+        self.data[num_cols] = self.data[num_cols].fillna(0)
+        self.data = self.data.fillna('')
         if 'description' in self.data.columns:
             self.data['description'] = self.data['description'].str.lower()
         return self.data
@@ -35,22 +34,24 @@ class BotDetector:
         if method == 'smote':
             try:
                 from imblearn.over_sampling import SMOTE
-                smote = SMOTE(random_state=2112)
-                X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
-                return X_resampled, y_resampled
+                return self._fit_resample(SMOTE, X_train, y_train)
             except ImportError:
                 print("imblearn not installed.  Install with: pip install imbalanced-learn")
                 return X_train, y_train
-        elif method == 'undersample':
+        if method == 'undersample':
             try:
                 from imblearn.under_sampling import RandomUnderSampler
-                rus = RandomUnderSampler(random_state=2112)
-                X_resampled, y_resampled = rus.fit_resample(X_train, y_train)
-                return X_resampled, y_resampled
+                return self._fit_resample(RandomUnderSampler, X_train, y_train)
             except ImportError:
                 print("imblearn not installed. Install with: pip install imbalanced-learn")
                 return X_train, y_train
         return X_train, y_train
+
+    @staticmethod
+    def _fit_resample(resampler_cls, X_train, y_train):
+        """Build a resampler and apply it to training data."""
+        resampler = resampler_cls(random_state=2112)
+        return resampler.fit_resample(X_train, y_train)
 
     def select_features(self, X_train, y_train, k: int = 20):
         """Select top k features using mutual information"""
@@ -75,24 +76,19 @@ class BotDetector:
         if total == 0:
             raise ValueError("Cannot compute class weights: training labels are empty.")
 
-        unique_classes = np.unique(y_int)
-
-        # For binary classification problems with labels 0 and 1, explicitly ensure both are present.
-        if set(unique_classes).issubset({0, 1}):
-            expected = {0, 1}
-            missing_binary = sorted(expected - set(unique_classes))
-            if missing_binary:
-                raise ValueError(
-                    f"Cannot compute class weights: no samples found for classes {missing_binary}. "
-                    "Adjust the train/validation split or resampling strategy to include all classes."
-                )
+        unique_classes = set(np.unique(y_int))
+        if unique_classes.issubset({0, 1}):
+            missing_classes = sorted({0, 1} - unique_classes)
         else:
-            # For non-binary or non-0/1 label schemes, fall back to checking counts from np.bincount.
             missing_classes = [i for i, count in enumerate(class_counts) if count == 0]
-            if missing_classes:
-                raise ValueError(
-                    f"Cannot compute class weights: no samples found for classes {missing_classes}. "
-                    "Adjust the train/validation split or resampling strategy to include all classes."
-                )
-        weights = {i: total / (len(class_counts) * count) for i, count in enumerate(class_counts)}
-        return weights
+
+        if missing_classes:
+            raise ValueError(
+                f"Cannot compute class weights: no samples found for classes {missing_classes}. "
+                "Adjust the train/validation split or resampling strategy to include all classes."
+            )
+
+        return {
+            i: total / (len(class_counts) * count)
+            for i, count in enumerate(class_counts)
+        }

@@ -1,11 +1,4 @@
-"""
-SHAP Explainer
-==============
-SHapley Additive exPlanations for model interpretability.
-
-SHAP values provide consistent and locally accurate attribution
-of predictions to features, based on game theory.
-"""
+"""SHAP (SHapley Additive exPlanations) for model interpretability."""
 
 from typing import Any, Dict, List, Optional, Union
 import numpy as np
@@ -14,28 +7,11 @@ from pathlib import Path
 
 
 class SHAPExplainer:
-    """
-    SHAP-based model explainer for bot detection.
-    
-    SHAP (SHapley Additive exPlanations) uses game theory to
-    explain individual predictions by computing the contribution
-    of each feature.
-    
-    Key concepts:
-        - SHAP value: The contribution of a feature to the prediction
-        - Base value: The average model output
-        - Local explanation: Why a specific sample was classified as it was
-        - Global explanation: Overall feature importance across all samples
-    """
+    """SHAP-based explainer for bot detection models."""
     
     def __init__(self, model, feature_names: List[str] = None):
-        """
-        Initialize SHAP explainer.
-        
-        Args:
-            model: Trained model (can be sklearn model or BaseModel instance)
-            feature_names: List of feature names
-        """
+        """Initialize with trained model and optional feature names."""
+        self._raw_model = model
         self.model = self._get_underlying_model(model)
         self.feature_names = feature_names
         self.explainer = None
@@ -44,21 +20,44 @@ class SHAPExplainer:
     
     def _get_underlying_model(self, model):
         """Extract underlying sklearn model if wrapped."""
-        if hasattr(model, 'model'):  # BaseModel wrapper
+        if hasattr(model, 'model'):
             return model.model
         return model
-    
+
+    def _create_explainer(self, shap, X_background):
+        """Select and build the appropriate SHAP explainer for the model type."""
+        name = type(self.model).__name__.lower()
+        if any(kw in name for kw in ('tree', 'forest', 'gradient', 'xgb', 'lgbm', 'catboost')):
+            return shap.TreeExplainer(self.model)
+        if 'tabnet' in name:
+            return shap.KernelExplainer(lambda x: self._raw_model.predict_proba(x), X_background)
+        return shap.Explainer(self.model, X_background)
+
+    def _compute_shap_values(self, X: Union[np.ndarray, pd.DataFrame]):
+        """Compute SHAP values across both callable and legacy APIs."""
+        if callable(self.explainer):
+            return self.explainer(X)
+        if hasattr(self.explainer, 'shap_values'):
+            return self.explainer.shap_values(X)
+        raise TypeError("Unsupported SHAP explainer API: expected callable or shap_values().")
+
+    @staticmethod
+    def _to_values_array(shap_output: Any) -> np.ndarray:
+        """Normalize SHAP output into a 2D (samples, features) ndarray."""
+        if hasattr(shap_output, 'values'):
+            values = np.asarray(shap_output.values)
+        elif isinstance(shap_output, list):
+            class_values = shap_output[1] if len(shap_output) > 1 else shap_output[0]
+            values = np.asarray(class_values)
+        else:
+            values = np.asarray(shap_output)
+
+        if values.ndim == 3:
+            values = values[:, :, 1]
+        return values
+
     def fit(self, X: Union[np.ndarray, pd.DataFrame], max_samples: int = 100) -> 'SHAPExplainer':
-        """
-        Fit the SHAP explainer on background data.
-        
-        Args:
-            X: Background data for SHAP explainer
-            max_samples: Maximum samples to use for background
-            
-        Returns:
-            self
-        """
+        """Fit SHAP explainer on background data (up to max_samples)."""
         try:
             import shap
         except ImportError:
@@ -75,15 +74,7 @@ class SHAPExplainer:
         else:
             X_background = X
         
-        # Choose appropriate explainer based on model type
-        model_name = type(self.model).__name__.lower()
-        
-        if 'tree' in model_name or 'forest' in model_name or 'gradient' in model_name:
-            # Tree-based models
-            self.explainer = shap.TreeExplainer(self.model)
-        else:
-            # Linear and other models
-            self.explainer = shap.Explainer(self.model, X_background)
+        self.explainer = self._create_explainer(shap, X_background)
         
         if self.feature_names is None:
             if isinstance(X, pd.DataFrame):
@@ -107,18 +98,8 @@ class SHAPExplainer:
         if not self._is_fitted:
             raise RuntimeError("Explainer not fitted. Call fit() first.")
         
-        import shap
-        
-        self.shap_values = self.explainer(X)
-        
-        # Handle different SHAP value formats
-        if hasattr(self.shap_values, 'values'):
-            values = self.shap_values.values
-            # For binary classification, take positive class
-            if len(values.shape) == 3:
-                values = values[:, :, 1]
-            return values
-        return self.shap_values
+        self.shap_values = self._compute_shap_values(X)
+        return self._to_values_array(self.shap_values)
     
     def get_global_importance(self) -> Dict[str, float]:
         """
@@ -130,15 +111,8 @@ class SHAPExplainer:
         if self.shap_values is None:
             raise RuntimeError("No SHAP values computed. Call explain() first.")
         
-        import shap
-        
-        if hasattr(self.shap_values, 'values'):
-            values = self.shap_values.values
-            if len(values.shape) == 3:
-                values = values[:, :, 1]
-        else:
-            values = self.shap_values
-        
+        values = self._to_values_array(self.shap_values)
+
         # Mean absolute SHAP value per feature
         importance = np.abs(values).mean(axis=0)
         return dict(zip(self.feature_names, importance))
@@ -244,10 +218,13 @@ class SHAPExplainer:
         
         if self.shap_values is None:
             self.explain(X)
-        
+        expected_value = getattr(self.explainer, 'expected_value', 0)
+        if isinstance(expected_value, (list, np.ndarray)):
+            expected_value = expected_value[1] if len(expected_value) > 1 else expected_value[0]
+
         return shap.force_plot(
-            self.explainer.expected_value if hasattr(self.explainer, 'expected_value') else 0,
-            self.shap_values[instance_idx].values if hasattr(self.shap_values[instance_idx], 'values') else self.shap_values[instance_idx],
+            expected_value,
+            self._to_values_array(self.shap_values)[instance_idx],
             X[instance_idx] if hasattr(X, '__getitem__') else X,
             feature_names=self.feature_names
         )
@@ -277,7 +254,7 @@ class SHAPExplainer:
         
         shap.dependence_plot(
             feature,
-            self.shap_values.values if hasattr(self.shap_values, 'values') else self.shap_values,
+            self._to_values_array(self.shap_values),
             X,
             feature_names=self.feature_names,
             interaction_index=interaction_feature,
@@ -287,16 +264,27 @@ class SHAPExplainer:
         return plt.gcf()
     
     def save_explanations(self, path: str) -> None:
-        """Save SHAP values to disk."""
+        """Save SHAP values to disk as a compressed NPZ archive."""
         if self.shap_values is None:
             raise RuntimeError("No SHAP values to save. Call explain() first.")
         
-        path = Path(path)
+        path = self._validate_output_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
-        import pickle
-        with open(path, 'wb') as f:
-            pickle.dump({
-                'shap_values': self.shap_values,
-                'feature_names': self.feature_names,
-            }, f)
+
+        values = self.shap_values.values if hasattr(self.shap_values, "values") else self.shap_values
+        np.savez_compressed(
+            path,
+            shap_values=np.asarray(values),
+            feature_names=np.asarray(self.feature_names, dtype=str),
+        )
+
+    @staticmethod
+    def _validate_output_path(path: str) -> Path:
+        """Restrict saved explanation paths to the current workspace."""
+        resolved = Path(path).expanduser().resolve()
+        workspace = Path(__file__).resolve().parent.parent
+        if resolved != workspace and workspace not in resolved.parents:
+            raise ValueError(
+                f"Path must stay within workspace: {workspace}"
+            )
+        return resolved
