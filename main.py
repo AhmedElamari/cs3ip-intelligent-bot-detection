@@ -6,11 +6,19 @@ JSON loading -> Feature engineering -> Preprocessing -> Model training -> Evalua
 """
 
 import argparse
+import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from typing import Optional
 from config import Config
+from benchmarking.hpo.service import (
+    HPOCliOverrides,
+    merge_hpo_into_config_params,
+    require_tabnet_dl,
+    resolve_hpo,
+)
+from benchmarking.hpo.registry import get as get_hpo_entry
 from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
@@ -58,7 +66,11 @@ def run_pipeline(
     use_time_split: bool = False,
     val_size: float = DEFAULT_VAL_SIZE,
     test_size: float = DEFAULT_TEST_SIZE,
-    random_state: int = DEFAULT_RANDOM_STATE
+    random_state: int = DEFAULT_RANDOM_STATE,
+    no_tune: bool = False,
+    retune: bool = False,
+    hpo_trials: Optional[int] = None,
+    config: Optional[Config] = None,
 ):
     """Run the complete bot detection pipeline on TwiBot-20.
     
@@ -73,6 +85,10 @@ def run_pipeline(
         random_state: Random seed for time-split shuffling
     """
     
+    cfg = config or Config()
+    if no_tune:
+        cfg.set("hpo.enabled", False)
+
     print("=" * 60)
     print("BOT DETECTION PIPELINE")
     print("=" * 60)
@@ -175,14 +191,10 @@ def run_pipeline(
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method='smote')
         print(f"After SMOTE: {len(X_train)} training samples")
     
-    # Step 6: Feature scaling (recommended for logistic regression/SVM)
+    # Step 6: scaling (LR/SVM) inside train_and_evaluate when should_scale
     should_scale = (use_scaling or model_type in ('logistic_regression', 'svm')) and model_type != 'tabnet'
     if should_scale:
-        if use_scaling:
-            print("\nApplying feature scaling...")
-        else:
-            print(f"\nApplying feature scaling for {model_type}...")
-        X_train, X_val, X_test = detector.scale_features(X_train, X_val, X_test)
+        print("\nApplying feature scaling in training (LR/SVM).")
     
     # Step 7: Feature selection (optional)
     if num_features:
@@ -195,15 +207,61 @@ def run_pipeline(
     # Step 8: Calculate class weights
     class_weights = detector.get_class_weights(y_train)
     print(f"\nClass weights: {class_weights}")
-    
-    # Step 9: Train and evaluate
+
     live_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else feature_names
+
+    entry = get_hpo_entry(model_type)
+    if entry.requires_dl:
+        require_tabnet_dl()
+
+    hpo_result, hpo_audit = resolve_hpo(
+        model_type,
+        cfg,
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        feature_names_ordered=list(live_names),
+        data_dir=TWIBOT20_DATA_DIR,
+        enable_scaling=should_scale,
+        class_weights=class_weights,
+        cli=HPOCliOverrides(
+            no_tune=no_tune,
+            retune=retune,
+            hpo_trials=hpo_trials,
+        ),
+    )
+    if hpo_result.get("status") != "skipped" and hpo_result.get("best_params"):
+        merge_hpo_into_config_params(cfg, model_type, hpo_result["best_params"])
+
+    results_dir = REPO_ROOT / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = results_dir / "hpo_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "HPOSummaryV1",
+                "models": {
+                    model_type: {
+                        **hpo_audit,
+                        "best_score": hpo_result.get("best_score"),
+                    }
+                },
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    # Step 9: Train and evaluate
     results = train_and_evaluate(
         X_train, X_val, X_test,
         y_train, y_val, y_test,
         model_type=model_type,
         class_weights=class_weights,
         feature_names=live_names,
+        enable_scaling=should_scale,
+        config=cfg,
     )
     
     print("\n" + "=" * 60)
@@ -263,9 +321,28 @@ def main():
         default=DEFAULT_RANDOM_STATE,
         help='Random seed for time-split shuffling'
     )
-    
+    parser.add_argument(
+        '--no-tune',
+        action='store_true',
+        help='Skip hyperparameter optimisation; use config params only',
+    )
+    parser.add_argument(
+        '--retune',
+        action='store_true',
+        help='Ignore HPO cache and run a fresh Optuna study',
+    )
+    parser.add_argument(
+        '--hpo-trials',
+        type=int,
+        default=None,
+        help='Override number of Optuna trials for this run',
+    )
+
     args = parser.parse_args()
-    
+
+    if args.no_tune and args.retune:
+        parser.error("Cannot use --no-tune together with --retune")
+
     run_pipeline(
         model_type=args.model,
         use_smote=args.smote,
@@ -274,7 +351,10 @@ def main():
         use_time_split=args.time_split,
         val_size=args.val_size,
         test_size=args.test_size,
-        random_state=args.random_state
+        random_state=args.random_state,
+        no_tune=args.no_tune,
+        retune=args.retune,
+        hpo_trials=args.hpo_trials,
     )
 
 

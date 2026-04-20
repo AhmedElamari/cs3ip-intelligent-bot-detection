@@ -55,9 +55,9 @@ class TrainingPipelineTest(unittest.TestCase):
 
     def test_model_types_supported(self):
         model_types = {
-            "random_forest": "RandomForestClassifier",
-            "logistic_regression": "LogisticRegression",
-            "svm": "SVC",
+            "random_forest": "RandomForestModel",
+            "logistic_regression": "LogisticRegressionModel",
+            "svm": "SVMModel",
         }
         for model_type, expected_class in model_types.items():
             results = self.train_and_evaluate(
@@ -84,7 +84,7 @@ class TrainingPipelineTest(unittest.TestCase):
             model_type="svm",
             class_weights=class_weights
         )
-        self.assertEqual(results["model"].class_weight, class_weights)
+        self.assertEqual(results["model"]._params.get("class_weight"), class_weights)
 
     def test_invalid_model_type_raises(self):
         with self.assertRaises(ValueError):

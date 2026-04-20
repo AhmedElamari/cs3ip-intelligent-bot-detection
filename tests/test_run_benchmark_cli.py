@@ -3,8 +3,10 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional
+from typing import Any, Optional
 from unittest import mock
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -51,6 +53,41 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
             if config_enabled is not None:
                 argv.extend(["--config", str(self._write_config(tmp_path, config_enabled))])
 
+            def _fake_prepare(*args: Any, **kwargs: Any):
+                return (
+                    np.zeros((4, 2)),
+                    np.zeros((2, 2)),
+                    np.zeros((2, 2)),
+                    np.array([0, 1, 0, 1]),
+                    np.array([0, 1]),
+                    np.array([0, 1]),
+                    ["a", "b"],
+                )
+
+            def _fake_resolve(model_name: str, config: Any, **kw: Any):
+                return (
+                    {
+                        "schema_version": "HPOResultV1",
+                        "status": "skipped",
+                        "best_params": {},
+                        "best_score": float("nan"),
+                        "trial_count": 0,
+                        "metric": "val_f1",
+                        "seed": 2112,
+                        "warnings": [],
+                        "model_name": model_name,
+                        "search_space_version": "none",
+                    },
+                    {
+                        "cache_hit": False,
+                        "artifact": None,
+                        "search_space_version": None,
+                        "trial_count": 0,
+                        "best_score": None,
+                        "skipped": True,
+                    },
+                )
+
             with mock.patch.object(sys, "argv", argv), mock.patch.object(
                 run_benchmark,
                 "load_data",
@@ -58,7 +95,14 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
             ), mock.patch.object(
                 run_benchmark,
                 "prepare_data",
-                return_value=([], [], [], [], [], [], []),
+                side_effect=_fake_prepare,
+            ), mock.patch.object(
+                run_benchmark,
+                "resolve_hpo",
+                side_effect=_fake_resolve,
+            ), mock.patch.object(
+                run_benchmark,
+                "merge_hpo_into_config_params",
             ), mock.patch.object(
                 run_benchmark,
                 "create_models",
