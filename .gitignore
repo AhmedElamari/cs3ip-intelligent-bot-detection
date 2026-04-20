@@ -24,6 +24,5 @@ AGENTS.md
 tasks/
 .vscode/
 debug-*.log
-./Archive_results/
+Archive_results/
 
-tasks/

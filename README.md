@@ -90,6 +90,7 @@ python run_benchmark.py --models random_forest xgboost --explain --robustness-an
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
+- `results/benchmark_YYYYMMDD_HHMMSS/dissertation_scoreboard.csv`, `dissertation_scoreboard.md`, and `dissertation_scoreboard.tex` — dissertation Table 8.2 style baseline scoreboard (F1-macro / F1-weighted, PR-AUC, MCC, balanced accuracy; Markdown/LaTeX bold best column values)
 - `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.md`
 - `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt` (compatibility mirror)
 - `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`

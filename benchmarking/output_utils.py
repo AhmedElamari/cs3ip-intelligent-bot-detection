@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from config import Config
 from benchmarking import ModelBenchmark
+from benchmarking.dissertation_scoreboard import build_scoreboard, to_latex, to_markdown
 from benchmarking.run_metadata import BenchmarkRunContext, write_run_metadata
 
 
@@ -35,6 +36,16 @@ def save_final_outputs(
 ) -> None:
     """Save required benchmark artifacts; raise if any required write fails."""
     benchmark.save_results(output_dir)
+
+    scoreboard_df = build_scoreboard(benchmark)
+    if not scoreboard_df.empty:
+        scoreboard_df.to_csv(output_dir / "dissertation_scoreboard.csv", index=False)
+        (output_dir / "dissertation_scoreboard.md").write_text(
+            to_markdown(scoreboard_df), encoding="utf-8"
+        )
+        (output_dir / "dissertation_scoreboard.tex").write_text(
+            to_latex(scoreboard_df), encoding="utf-8"
+        )
 
     report = benchmark.generate_report()
     report_path_md = output_dir / 'benchmark_report.md'
