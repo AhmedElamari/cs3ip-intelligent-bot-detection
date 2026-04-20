@@ -5,24 +5,14 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Sequence
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import average_precision_score, f1_score
 
 from adversarial import RealisticPerturbationEngine
-from explainability import FeatureResilienceAnalyzer, SHAPExplainer
 from .output_formatting import format_frame_for_export, format_payload_for_export
-
-
-SUPPORTED_SHAP_MODELS = {'random_forest', 'xgboost', 'tabnet'}
-EXPECTED_SHAP_EXCEPTIONS = (
-    ImportError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-    AttributeError,
-)
 
 
 def run_robustness_analysis(
@@ -39,11 +29,13 @@ def run_robustness_analysis(
     results = analyzer.run()
     analyzer.save_outputs(output_dir, results)
     benchmark.robustness_summary = results['summary']
+    benchmark.robustness_degradation = results['degradation']
+    benchmark.feature_attack_results = results['feature_attacks']
     return results
 
 
 class RobustnessAnalyzer:
-    """Evaluate prediction and explanation robustness under realistic perturbations."""
+    """Evaluate prediction robustness under realistic perturbations."""
 
     def __init__(self, benchmark: Any, feature_names: Sequence[str], config: Any):
         self.benchmark = benchmark
@@ -63,9 +55,6 @@ class RobustnessAnalyzer:
         self.profiles = list(config.get('robustness.profiles', ['cheap_only', 'realistic_mixed']))
         self.evaluate_single_feature_attacks = config.get('robustness.evaluate_single_feature_attacks', True)
         self.evaluate_bundle_attacks = config.get('robustness.evaluate_bundle_attacks', True)
-        self.max_shap_samples = config.get('robustness.max_shap_samples', 50)
-        self.shap_top_k = config.get('robustness.shap_top_k', 5)
-        self.supported_shap_models = SUPPORTED_SHAP_MODELS
 
     @staticmethod
     def _to_frame(X: Any, feature_names: Sequence[str]) -> pd.DataFrame:
@@ -76,10 +65,7 @@ class RobustnessAnalyzer:
     def run(self) -> Dict[str, pd.DataFrame]:
         feature_rows: List[Dict[str, Any]] = []
         summary_rows: List[Dict[str, Any]] = []
-        stability_rows: List[Dict[str, Any]] = []
-        frs_rows: List[Dict[str, Any]] = []
-        pivot_rows: List[Dict[str, Any]] = []
-        diagnostic_rows: List[Dict[str, Any]] = []
+        degradation_rows: List[Dict[str, Any]] = []
 
         attacked_mask = self._attack_population_mask()
         attacked_base = (
@@ -96,9 +82,7 @@ class RobustnessAnalyzer:
             baseline_detected_mask = baseline_preds == 1
             baseline_detected_count = int(baseline_detected_mask.sum())
 
-            shap_context = self._build_shap_context(model_name, model, attacked_base)
-            if shap_context['diagnostic'] is not None:
-                diagnostic_rows.append(shap_context['diagnostic'])
+            degradation_rows.extend(self._degradation_rows(model_name, model))
 
             if self.evaluate_single_feature_attacks:
                 for feature in self.engine.available_single_feature_attacks():
@@ -112,10 +96,6 @@ class RobustnessAnalyzer:
                         baseline_detected_count,
                         baseline_proba,
                         model,
-                        shap_context,
-                        frs_rows,
-                        stability_rows,
-                        diagnostic_rows,
                     )
                     feature_rows.append(row)
 
@@ -132,20 +112,13 @@ class RobustnessAnalyzer:
                             baseline_detected_count,
                             baseline_proba,
                             model,
-                            shap_context,
-                            stability_rows,
-                            pivot_rows,
-                            diagnostic_rows,
                         )
                     )
 
         return {
             'summary': pd.DataFrame(summary_rows),
             'feature_attacks': pd.DataFrame(feature_rows),
-            'shap_rank_stability': pd.DataFrame(stability_rows),
-            'feature_resilience': pd.DataFrame(frs_rows),
-            'shap_pivots': pd.DataFrame(pivot_rows),
-            'shap_diagnostics': pd.DataFrame(diagnostic_rows),
+            'degradation': pd.DataFrame(degradation_rows),
         }
 
     def _attack_population_mask(self) -> np.ndarray:
@@ -154,6 +127,55 @@ class RobustnessAnalyzer:
                 "robustness.attack_population currently only supports 'true_bots' to avoid audit ambiguity."
             )
         return self.y_test == 1
+
+    def _scenario_metrics(self, model_name: str, model: Any, X_frame: pd.DataFrame) -> Dict[str, float]:
+        inputs = self.benchmark.prepare_eval_inputs(model_name, X_frame)
+        preds = np.asarray(model.predict(inputs))
+        proba = self._bot_probability(model, inputs)
+        y = self.y_test
+        macro_f1 = float(f1_score(y, preds, average='macro', zero_division=0))
+        pr_auc = float(average_precision_score(y, proba))
+        return {'macro_f1': macro_f1, 'pr_auc': pr_auc}
+
+    def _build_profile_perturbed_full_test(self, profile: str) -> pd.DataFrame:
+        """Full test matrix with profile applied to true-bot rows only (index-aligned)."""
+        X_work = self.base_test.copy()
+        attacked_mask = self._attack_population_mask()
+        if not attacked_mask.any():
+            return X_work
+        sub = (
+            self.base_test.loc[attacked_mask]
+            .sort_values(self.feature_names, kind='mergesort')
+            .copy()
+        )
+        profile_result = self.engine.apply_profile(sub, profile)
+        if not profile_result.applied:
+            return X_work
+        mutated = profile_result.data
+        for col in mutated.columns:
+            if col in X_work.columns:
+                X_work.loc[sub.index, col] = mutated.loc[sub.index, col].values
+        return X_work
+
+    def _degradation_rows(self, model_name: str, model: Any) -> List[Dict[str, Any]]:
+        rows: List[Dict[str, Any]] = []
+        base_m = self._scenario_metrics(model_name, model, self.base_test)
+        rows.append({
+            'model': model_name,
+            'scenario': 'baseline',
+            'macro_f1': base_m['macro_f1'],
+            'pr_auc': base_m['pr_auc'],
+        })
+        for profile in self.profiles:
+            X_prof = self._build_profile_perturbed_full_test(profile)
+            m = self._scenario_metrics(model_name, model, X_prof)
+            rows.append({
+                'model': model_name,
+                'scenario': profile,
+                'macro_f1': m['macro_f1'],
+                'pr_auc': m['pr_auc'],
+            })
+        return rows
 
     def _single_attack_row(
         self,
@@ -165,10 +187,6 @@ class RobustnessAnalyzer:
         baseline_detected_count: int,
         baseline_proba: np.ndarray,
         model: Any,
-        shap_context: Dict[str, Any],
-        frs_rows: List[Dict[str, Any]],
-        stability_rows: List[Dict[str, Any]],
-        diagnostic_rows: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         row = {
             'model': model_name,
@@ -184,9 +202,6 @@ class RobustnessAnalyzer:
             'confidence_drop_median': np.nan,
             'confidence_drop_std': np.nan,
             'confidence_drop_non_flip_mean': np.nan,
-            'mean_rank_stability': np.nan,
-            'shap_status': 'not_requested',
-            'shap_error': None,
         }
         if not attack_result.applied:
             return row
@@ -194,31 +209,15 @@ class RobustnessAnalyzer:
         mutated_inputs = self.benchmark.prepare_eval_inputs(model_name, attack_result.data)
         mutated_preds = np.asarray(model.predict(mutated_inputs))
         mutated_proba = self._bot_probability(model, mutated_inputs)
-        metrics = self._prediction_metrics(
-            baseline_detected_mask,
-            baseline_detected_count,
-            baseline_proba,
-            mutated_preds,
-            mutated_proba,
+        row.update(
+            self._prediction_metrics(
+                baseline_detected_mask,
+                baseline_detected_count,
+                baseline_proba,
+                mutated_preds,
+                mutated_proba,
+            )
         )
-        row.update(metrics)
-        shap_metrics = self._shap_metrics(
-            model_name=model_name,
-            scenario_name=feature,
-            scenario_type='feature',
-            primary_feature=feature,
-            shap_context=shap_context,
-            mutated_inputs=mutated_inputs,
-            baseline_detected_count=baseline_detected_count,
-            flips_to_human=metrics['flips_to_human'],
-        )
-        row.update(self._shap_columns(shap_metrics))
-        stability_rows.extend(shap_metrics['stability_rows'])
-        diagnostic = shap_metrics['diagnostic']
-        if diagnostic is not None:
-            diagnostic_rows.append(diagnostic)
-        if shap_metrics['frs_row'] is not None:
-            frs_rows.append(shap_metrics['frs_row'])
         return row
 
     def _profile_row(
@@ -231,10 +230,6 @@ class RobustnessAnalyzer:
         baseline_detected_count: int,
         baseline_proba: np.ndarray,
         model: Any,
-        shap_context: Dict[str, Any],
-        stability_rows: List[Dict[str, Any]],
-        pivot_rows: List[Dict[str, Any]],
-        diagnostic_rows: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
         row = {
             'model': model_name,
@@ -248,9 +243,6 @@ class RobustnessAnalyzer:
             'confidence_drop_median': np.nan,
             'confidence_drop_std': np.nan,
             'confidence_drop_non_flip_mean': np.nan,
-            'mean_rank_stability': np.nan,
-            'shap_status': 'not_requested',
-            'shap_error': None,
         }
         if not profile_result.applied:
             return row
@@ -267,22 +259,6 @@ class RobustnessAnalyzer:
                 mutated_proba,
             )
         )
-        shap_metrics = self._shap_metrics(
-            model_name=model_name,
-            scenario_name=profile,
-            scenario_type='profile',
-            primary_feature=None,
-            shap_context=shap_context,
-            mutated_inputs=mutated_inputs,
-            baseline_detected_count=baseline_detected_count,
-            flips_to_human=row['flips_to_human'],
-        )
-        row.update(self._shap_columns(shap_metrics))
-        stability_rows.extend(shap_metrics['stability_rows'])
-        pivot_rows.extend(shap_metrics['pivot_rows'])
-        diagnostic = shap_metrics['diagnostic']
-        if diagnostic is not None:
-            diagnostic_rows.append(diagnostic)
         return row
 
     def _prediction_metrics(
@@ -326,193 +302,6 @@ class RobustnessAnalyzer:
         proba = np.asarray(proba)
         return proba[:, 1] if proba.ndim > 1 else proba
 
-    @staticmethod
-    def _format_exception(exc: Exception) -> str:
-        return f'{type(exc).__name__}: {exc}'
-
-    def _build_shap_context(
-        self,
-        model_name: str,
-        model: Any,
-        attacked_base: pd.DataFrame,
-    ) -> Dict[str, Any]:
-        if model_name not in self.supported_shap_models:
-            return self._shap_context_skip(
-                model_name,
-                stage='build_context',
-                status='unsupported_model',
-                message=f'SHAP robustness metrics are not configured for model {model_name!r}.',
-            )
-        try:
-            X_train_model, _, _ = self.benchmark.get_prepared_inputs(model_name)
-            sample_count = min(self.max_shap_samples, len(attacked_base))
-            attacked_subset = attacked_base.iloc[:sample_count].copy()
-            baseline_inputs = self.benchmark.prepare_eval_inputs(model_name, attacked_subset)
-            explainer = SHAPExplainer(model, self.feature_names)
-            explainer.fit(X_train_model, max_samples=self.max_shap_samples)
-            baseline_values = explainer.explain(baseline_inputs)
-            return {
-                'explainer': explainer,
-                'baseline_inputs': baseline_inputs,
-                'baseline_values': baseline_values,
-                'attacked_subset': attacked_subset,
-                'available': True,
-                'diagnostic': None,
-            }
-        except EXPECTED_SHAP_EXCEPTIONS as exc:
-            return self._shap_context_skip(
-                model_name,
-                stage='build_context',
-                status='build_failed',
-                message=self._format_exception(exc),
-            )
-
-    @staticmethod
-    def _shap_context_skip(
-        model_name: str,
-        stage: str,
-        status: str,
-        message: str,
-    ) -> Dict[str, Any]:
-        return {
-            'available': False,
-            'explainer': None,
-            'baseline_inputs': None,
-            'baseline_values': None,
-            'attacked_subset': None,
-            'diagnostic': {
-                'model': model_name,
-                'stage': stage,
-                'status': status,
-                'error': message,
-            },
-        }
-
-    @staticmethod
-    def _shap_columns(shap_metrics: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            'mean_rank_stability': shap_metrics['mean_rank_stability'],
-            'shap_status': shap_metrics['status'],
-            'shap_error': shap_metrics['error'],
-        }
-
-    def _shap_metrics(
-        self,
-        model_name: str,
-        scenario_name: str,
-        scenario_type: str,
-        primary_feature: Optional[str],
-        shap_context: Dict[str, Any],
-        mutated_inputs: Any,
-        baseline_detected_count: int,
-        flips_to_human: Any,
-    ) -> Dict[str, Any]:
-        result = {
-            'mean_rank_stability': np.nan,
-            'stability_rows': [],
-            'pivot_rows': [],
-            'frs_row': None,
-            'status': 'not_requested',
-            'error': None,
-            'diagnostic': None,
-        }
-        if not shap_context['available']:
-            diagnostic = shap_context['diagnostic']
-            result['status'] = diagnostic['status']
-            result['error'] = diagnostic['error']
-            return result
-
-        try:
-            subset_len = len(shap_context['attacked_subset'])
-            mutated_subset = mutated_inputs[:subset_len]
-            mutated_values = shap_context['explainer'].explain(mutated_subset)
-        except EXPECTED_SHAP_EXCEPTIONS as exc:
-            result['status'] = 'explain_failed'
-            result['error'] = self._format_exception(exc)
-            result['diagnostic'] = {
-                'model': model_name,
-                'scenario_type': scenario_type,
-                'scenario_name': scenario_name,
-                'stage': 'explain',
-                'status': result['status'],
-                'error': result['error'],
-            }
-            return result
-
-        baseline_values = np.asarray(shap_context['baseline_values'])
-        mutated_values = np.asarray(mutated_values)
-        mean_stability = []
-        feature_stabilities = []
-        feature_idx = self.feature_names.index(primary_feature) if primary_feature in self.feature_names else None
-        result['status'] = 'computed'
-
-        for idx, (before_row, after_row) in enumerate(zip(baseline_values, mutated_values)):
-            before_ranks = FeatureResilienceAnalyzer.rank_positions(before_row)
-            after_ranks = FeatureResilienceAnalyzer.rank_positions(after_row)
-            rank_stability = FeatureResilienceAnalyzer.normalized_rank_spearman(before_row, after_row)
-            mean_stability.append(rank_stability)
-            result['stability_rows'].append({
-                'model': model_name,
-                'scenario_type': scenario_type,
-                'scenario_name': scenario_name,
-                'row_index': idx,
-                'rank_stability': rank_stability,
-            })
-            pivot = FeatureResilienceAnalyzer.top_k_pivot_metadata(
-                self.feature_names,
-                before_row,
-                after_row,
-                top_k=self.shap_top_k,
-            )
-            pivot.update({
-                'model': model_name,
-                'scenario_name': scenario_name,
-                'scenario_type': scenario_type,
-                'row_index': idx,
-            })
-            result['pivot_rows'].append(pivot)
-            if feature_idx is not None:
-                feature_stabilities.append(
-                    FeatureResilienceAnalyzer.feature_rank_stability(before_ranks, after_ranks, feature_idx)
-                )
-
-        if mean_stability:
-            result['mean_rank_stability'] = self._stable_mean(mean_stability)
-
-        if feature_idx is not None:
-            mutable_indices = [
-                self.feature_names.index(name)
-                for name in self.engine.available_single_feature_attacks()
-                if name in self.feature_names
-            ]
-            baseline_abs = np.abs(baseline_values)
-            feature_importance = self._stable_mean(baseline_abs[:, feature_idx])
-            mutable_means = [
-                self._stable_mean(baseline_abs[:, idx]) for idx in mutable_indices
-            ]
-            max_importance = max(mutable_means) if mutable_means else feature_importance
-            importance_norm = feature_importance / max_importance if max_importance else np.nan
-            stability_mean = self._stable_mean(feature_stabilities) if feature_stabilities else np.nan
-            frs = FeatureResilienceAnalyzer.compute_feature_resilience(
-                importance=importance_norm,
-                stability=stability_mean,
-                flips_to_human=int(flips_to_human) if not pd.isna(flips_to_human) else 0,
-                baseline_detected_bots=baseline_detected_count,
-            )
-            result['frs_row'] = {
-                'model': model_name,
-                'feature': primary_feature,
-                'importance_norm': importance_norm,
-                'stability': stability_mean,
-                'flip_rate': (
-                    int(flips_to_human) / baseline_detected_count
-                    if baseline_detected_count else np.nan
-                ),
-                'frs': frs,
-            }
-
-        return result
-
     def save_outputs(self, output_dir: Path, results: Dict[str, pd.DataFrame]) -> None:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -520,10 +309,7 @@ class RobustnessAnalyzer:
         file_map = {
             'summary': 'robustness_summary.csv',
             'feature_attacks': 'feature_attack_results.csv',
-            'shap_rank_stability': 'shap_rank_stability.csv',
-            'feature_resilience': 'feature_resilience_scores.csv',
-            'shap_pivots': 'shap_pivot_features.csv',
-            'shap_diagnostics': 'shap_diagnostics.csv',
+            'degradation': 'robustness_degradation.csv',
         }
         for key, filename in file_map.items():
             format_frame_for_export(sorted_results[key]).to_csv(output_dir / filename, index=False)
@@ -556,19 +342,21 @@ class RobustnessAnalyzer:
     def _report_overview(cls, results: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
         summary = results['summary']
         feature_attacks = results['feature_attacks']
-        feature_resilience = results['feature_resilience']
+        degradation = results['degradation']
 
-        return {
-            'models': cls._sorted_unique(summary, 'model'),
+        overview: Dict[str, Any] = {
+            'models': cls._sorted_unique(summary, 'model') or cls._sorted_unique(degradation, 'model'),
             'profiles': cls._sorted_unique(summary, 'profile'),
+            'scenarios_evaluated': cls._sorted_unique(degradation, 'scenario'),
             'features_evaluated': cls._sorted_unique(feature_attacks, 'feature'),
             'baseline_detected_bots_total': cls._sum_column(summary, 'baseline_detected_bots'),
             'attacked_true_bots_total': cls._sum_column(summary, 'attacked_true_bots'),
             'mean_flip_rate': cls._mean_column(summary, 'flip_rate'),
             'mean_confidence_drop': cls._mean_column(feature_attacks, 'confidence_drop_mean'),
-            'mean_rank_stability': cls._mean_column(summary, 'mean_rank_stability'),
-            'mean_feature_resilience_score': cls._mean_column(feature_resilience, 'frs'),
+            'mean_macro_f1': cls._mean_column(degradation, 'macro_f1'),
+            'mean_pr_auc': cls._mean_column(degradation, 'pr_auc'),
         }
+        return overview
 
     @staticmethod
     def _sorted_unique(frame: pd.DataFrame, column: str) -> List[Any]:
@@ -584,7 +372,7 @@ class RobustnessAnalyzer:
         return int(frame[column].fillna(0).sum())
 
     @staticmethod
-    def _mean_column(frame: pd.DataFrame, column: str) -> Optional[float]:
+    def _mean_column(frame: pd.DataFrame, column: str) -> Any:
         if column not in frame or frame.empty:
             return None
         values = frame[column].dropna().to_numpy(dtype=np.float64, copy=True)
@@ -639,10 +427,7 @@ class RobustnessAnalyzer:
         sort_columns = {
             'summary': ['model', 'profile'],
             'feature_attacks': ['model', 'feature'],
-            'shap_rank_stability': ['model', 'scenario_type', 'scenario_name', 'row_index'],
-            'feature_resilience': ['model', 'feature'],
-            'shap_pivots': ['model', 'scenario_type', 'scenario_name', 'row_index'],
-            'shap_diagnostics': ['model', 'stage', 'status'],
+            'degradation': ['model', 'scenario'],
         }
         sorted_results = {}
         for key, frame in results.items():

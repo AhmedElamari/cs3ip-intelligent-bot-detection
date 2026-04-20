@@ -4,7 +4,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 try:
     import numpy as np
@@ -122,32 +121,54 @@ class RobustnessAnalysisTest(unittest.TestCase):
 
         benchmark, config, feature_names = self._build_benchmark()
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
             output_dir = Path(tmp)
             results = run_robustness_analysis(benchmark, feature_names, config, output_dir)
             self.assertTrue((output_dir / 'robustness_summary.csv').exists())
+            self.assertTrue((output_dir / 'robustness_degradation.csv').exists())
         self.assertIn('summary', results)
         self.assertIn('feature_attacks', results)
+        self.assertIn('degradation', results)
         summary = results['summary']
         feature_attacks = results['feature_attacks']
-        diagnostics = results['shap_diagnostics']
+        degradation = results['degradation']
         for column in ('model', 'profile', 'attacked_true_bots', 'baseline_detected_bots', 'flip_rate'):
             self.assertIn(column, summary.columns)
         for column in (
             'model', 'feature', 'cost_tier', 'baseline_detected_bots',
-            'confidence_drop_mean', 'shap_status', 'shap_error',
+            'confidence_drop_mean',
         ):
             self.assertIn(column, feature_attacks.columns)
-        for column in ('model', 'stage', 'status', 'error'):
-            self.assertIn(column, diagnostics.columns)
+        for column in ('model', 'scenario', 'macro_f1', 'pr_auc'):
+            self.assertIn(column, degradation.columns)
+
+    def test_robustness_degradation_csv_schema(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+        results = analyzer.run()
+        deg = results['degradation']
+        profiles = list(config.get('robustness.profiles', []))
+        for model in benchmark.results:
+            sub = deg[deg['model'] == model].sort_values('scenario')
+            scenarios = set(sub['scenario'].tolist())
+            self.assertIn('baseline', scenarios)
+            for p in profiles:
+                self.assertIn(p, scenarios)
+            for _, row in sub.iterrows():
+                self.assertTrue(0.0 <= row['macro_f1'] <= 1.0)
+                self.assertTrue(0.0 <= row['pr_auc'] <= 1.0)
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            analyzer.save_outputs(Path(tmp), results)
+            self.assertTrue((Path(tmp) / 'robustness_degradation.csv').exists())
 
     def test_save_outputs_writes_compact_json_manifest(self):
         from benchmarking.robustness import RobustnessAnalyzer
 
         benchmark, config, feature_names = self._build_benchmark()
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
         analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
 
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
@@ -166,6 +187,7 @@ class RobustnessAnalysisTest(unittest.TestCase):
         self.assertEqual(len(results['summary']), summary_manifest['rows'])
         self.assertListEqual(list(results['summary'].columns), summary_manifest['columns'])
         self.assertEqual(['logistic_regression'], report['overview']['models'])
+        self.assertIn('degradation', report['artifacts'])
 
     def test_save_outputs_sorts_frames_and_pretty_prints_json(self):
         from benchmarking.robustness import RobustnessAnalyzer
@@ -174,7 +196,6 @@ class RobustnessAnalysisTest(unittest.TestCase):
             enabled_models=("logistic_regression", "random_forest")
         )
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
         analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
 
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
@@ -232,7 +253,6 @@ class RobustnessAnalysisTest(unittest.TestCase):
 
         benchmark, config, feature_names = self._build_benchmark()
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
         analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
 
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
@@ -261,7 +281,6 @@ class RobustnessAnalysisTest(unittest.TestCase):
             enabled_models=("logistic_regression", "random_forest")
         )
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
         analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
 
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp_a, tempfile.TemporaryDirectory(dir=ROOT) as tmp_b:
@@ -273,6 +292,7 @@ class RobustnessAnalysisTest(unittest.TestCase):
             for filename in (
                 'robustness_summary.csv',
                 'feature_attack_results.csv',
+                'robustness_degradation.csv',
                 'robustness_report.json',
             ):
                 self.assertEqual(
@@ -287,7 +307,6 @@ class RobustnessAnalysisTest(unittest.TestCase):
             enabled_models=("logistic_regression", "random_forest")
         )
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
 
         analyzer_a = RobustnessAnalyzer(benchmark, feature_names, config)
         analyzer_b = RobustnessAnalyzer(benchmark, feature_names, config)
@@ -307,46 +326,6 @@ class RobustnessAnalysisTest(unittest.TestCase):
             results_b['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True).fillna(''),
             check_dtype=False,
         )
-
-    def test_shap_build_failures_are_recorded(self):
-        from benchmarking.robustness import RobustnessAnalyzer
-
-        benchmark, config, feature_names = self._build_benchmark()
-        config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
-        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
-        analyzer.supported_shap_models = {'logistic_regression'}
-        with mock.patch('benchmarking.robustness.SHAPExplainer') as mock_explainer:
-            mock_explainer.return_value.fit.side_effect = ImportError('SHAP unavailable')
-            with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
-                output_dir = Path(tmp)
-                results = analyzer.run()
-                analyzer.save_outputs(output_dir, results)
-                self.assertTrue((output_dir / 'shap_diagnostics.csv').exists())
-
-        failed_rows = results['feature_attacks'][results['feature_attacks']['shap_status'] == 'build_failed']
-        self.assertFalse(failed_rows.empty)
-        self.assertTrue(failed_rows['shap_error'].str.contains('ImportError: SHAP unavailable').all())
-        self.assertEqual({'build_failed'}, set(results['shap_diagnostics']['status']))
-
-    def test_shap_explain_failures_are_recorded(self):
-        from benchmarking.robustness import RobustnessAnalyzer
-
-        benchmark, config, feature_names = self._build_benchmark()
-        config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 2)
-        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
-        analyzer.supported_shap_models = {'logistic_regression'}
-        baseline_values = np.zeros((2, len(feature_names)))
-        with mock.patch('benchmarking.robustness.SHAPExplainer') as mock_explainer:
-            explainer = mock_explainer.return_value
-            explainer.explain.side_effect = [baseline_values] + [ValueError('mutated SHAP failed')] * 32
-            results = analyzer.run()
-
-        failed_rows = results['feature_attacks'][results['feature_attacks']['shap_status'] == 'explain_failed']
-        self.assertFalse(failed_rows.empty)
-        self.assertTrue(failed_rows['shap_error'].str.contains('ValueError: mutated SHAP failed').all())
-        self.assertEqual({'explain_failed'}, set(results['shap_diagnostics']['status']))
 
 
 if __name__ == '__main__':

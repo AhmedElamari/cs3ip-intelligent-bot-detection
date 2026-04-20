@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Optional
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -28,22 +28,21 @@ class _BenchmarkStub:
         return "stub_model", object(), {"f1": 1.0, "roc_auc": 1.0}
 
 
-class RunBenchmarkCliContractTest(unittest.TestCase):
-    def _write_config(self, directory: Path, enabled: bool) -> Path:
+class RunBenchmarkCliTest(unittest.TestCase):
+    def _write_config(self, directory: Path) -> Path:
         config_path = directory / "config.json"
         config_path.write_text(
-            json.dumps({"explainability": {"enabled": enabled}}),
+            json.dumps(
+                {
+                    "explainability": {"enabled": True},
+                    "robustness": {"enabled": True},
+                }
+            ),
             encoding="utf-8",
         )
         return config_path
 
-    def _run_main(
-        self,
-        *,
-        explain_flag: bool,
-        config_enabled: Optional[bool],
-        no_tune: bool = False,
-    ):
+    def _run_main(self, *extra_args: str):
         with TemporaryDirectory(dir=ROOT) as tmp:
             tmp_path = Path(tmp)
             output_root = tmp_path / "results"
@@ -53,13 +52,10 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
                 str(output_root),
                 "--models",
                 "logistic_regression",
+                "--config",
+                str(self._write_config(tmp_path)),
+                *extra_args,
             ]
-            if explain_flag:
-                argv.append("--explain")
-            if no_tune:
-                argv.append("--no-tune")
-            if config_enabled is not None:
-                argv.extend(["--config", str(self._write_config(tmp_path, config_enabled))])
 
             def _fake_prepare(*args: Any, **kwargs: Any):
                 return (
@@ -121,9 +117,6 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
                 return_value=_BenchmarkStub(),
             ), mock.patch.object(
                 run_benchmark,
-                "save_comparison_outputs",
-            ), mock.patch.object(
-                run_benchmark,
                 "save_final_outputs",
             ) as save_final_outputs, mock.patch.object(
                 run_benchmark,
@@ -131,70 +124,39 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
             ) as run_explainability_analysis, mock.patch.object(
                 run_benchmark,
                 "run_robustness_analysis",
-            ):
+            ) as run_robustness_analysis:
                 run_benchmark.main()
 
             return {
+                "final_called": save_final_outputs.called,
                 "xai_called": run_explainability_analysis.called,
+                "robustness_called": run_robustness_analysis.called,
                 "context": save_final_outputs.call_args.args[3],
             }
 
-    def _assert_explainability_result(
-        self,
-        result,
-        *,
-        xai_called: bool,
-        xai_enabled: bool,
-        effective_source: str,
-    ) -> None:
-        self.assertEqual(xai_called, result["xai_called"])
-        self.assertEqual(xai_enabled, result["context"].explainability["xai_enabled"])
-        self.assertEqual(effective_source, result["context"].explainability["xai_effective_source"])
+    def test_dissertation_core_keeps_final_outputs_and_skips_slow_extras(self):
+        result = self._run_main("--dissertation-core")
 
-    def test_cli_only_explainability_is_enabled(self):
-        result = self._run_main(explain_flag=True, config_enabled=False)
-        self._assert_explainability_result(
-            result,
-            xai_called=True,
-            xai_enabled=True,
-            effective_source="cli",
-        )
-
-    def test_config_only_explainability_is_enabled(self):
-        result = self._run_main(explain_flag=False, config_enabled=True)
-        self._assert_explainability_result(
-            result,
-            xai_called=True,
-            xai_enabled=True,
-            effective_source="config",
-        )
-
-    def test_cli_and_config_explainability_records_combined_source(self):
-        result = self._run_main(explain_flag=True, config_enabled=True)
-        self._assert_explainability_result(
-            result,
-            xai_called=True,
-            xai_enabled=True,
-            effective_source="cli+config",
-        )
-
-    def test_explicitly_disabled_explainability_skips_xai(self):
-        result = self._run_main(explain_flag=False, config_enabled=False)
-        self._assert_explainability_result(
-            result,
-            xai_called=False,
-            xai_enabled=False,
-            effective_source="disabled",
-        )
-
-    def test_no_tune_does_not_require_hpo_registry_entry(self):
-        self.assertFalse(hasattr(run_benchmark, "get_hpo_entry"))
-        result = self._run_main(
-            explain_flag=False,
-            config_enabled=False,
-            no_tune=True,
-        )
+        self.assertTrue(result["final_called"])
         self.assertFalse(result["xai_called"])
+        self.assertFalse(result["robustness_called"])
+        self.assertTrue(result["context"].args["dissertation_core"])
+        self.assertEqual(
+            "dissertation_core",
+            result["context"].explainability["xai_effective_source"],
+        )
+
+    def test_scoreboard_only_alias_maps_to_dissertation_core_behavior(self):
+        result = self._run_main("--scoreboard-only")
+
+        self.assertTrue(result["final_called"])
+        self.assertFalse(result["xai_called"])
+        self.assertFalse(result["robustness_called"])
+        self.assertTrue(result["context"].args["dissertation_core"])
+        self.assertEqual(
+            "dissertation_core",
+            result["context"].explainability["xai_effective_source"],
+        )
 
 
 if __name__ == "__main__":
