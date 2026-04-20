@@ -149,6 +149,21 @@ class TestResolveHPO(unittest.TestCase):
         self.assertEqual(res.get("search_space_version"), "missing")
         self.assertTrue(audit.get("skipped"))
 
+    def test_invalid_trial_budget_raises_before_optuna_runs(self):
+        cfg = Config()
+        cfg.set("hpo.trials_per_model.random_forest", 0)
+
+        with mock.patch(
+            "benchmarking.hpo.service.require_optuna",
+        ) as require_optuna, mock.patch(
+            "benchmarking.hpo.service.optimize_model",
+        ) as optimize_model:
+            with self.assertRaisesRegex(ValueError, "at least 1"):
+                self._resolve(cfg, "random_forest")
+
+        require_optuna.assert_not_called()
+        optimize_model.assert_not_called()
+
 
 class TestOptimizeModel(unittest.TestCase):
     def test_build_model_inputs_runs_once_per_hpo_run(self):

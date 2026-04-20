@@ -61,6 +61,12 @@ def _device_string() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _validated_trial_count(n_trials: int) -> int:
+    if n_trials < 1:
+        raise ValueError("HPO trial count must be at least 1.")
+    return n_trials
+
+
 def _fit_and_val_f1(
     model_name: str,
     merged_params: dict[str, Any],
@@ -115,6 +121,7 @@ def optimize_model(
     """
     Run Optuna HPO for ``model_name``; return HPOResultV1 dict.
     """
+    n_trials = _validated_trial_count(int(n_trials))
     optuna = require_optuna()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -229,7 +236,9 @@ def resolve_hpo(
     fail_fast = hpo_cfg.get("fail_fast", True)
 
     trials_default = (hpo_cfg.get("trials_per_model") or {}).get(model_name, 30)
-    n_trials = int(cli.hpo_trials if cli.hpo_trials is not None else trials_default)
+    n_trials = _validated_trial_count(
+        int(cli.hpo_trials if cli.hpo_trials is not None else trials_default)
+    )
 
     audit: dict[str, Any] = {
         "model_name": model_name,
