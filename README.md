@@ -14,7 +14,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
-- Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop, SHAP stability, pivot tracking, and feature resilience scoring
+- Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop on true bots, full-test-set Macro-F1 / PR-AUC degradation per profile, and dissertation figures (`robustness_profile_degradation.png`, feature vulnerability table/chart)
 
 ## Project Structure
 ```
@@ -82,20 +82,24 @@ Expected output (console):
 
 Run a benchmark with explainability:
 ```bash
-python run_benchmark.py --explain --save-plots
+python run_benchmark.py --explain
 ```
 Run the optional robustness audit:
 ```bash
-python run_benchmark.py --models random_forest xgboost --explain --robustness-analysis --save-plots
+python run_benchmark.py --models random_forest xgboost --explain --robustness-analysis
+```
+Recommended **dissertation core** run (full HPO, **every** model from config when you omit `--models`, bootstrap CIs + pairwise significance, full CSV/JSON/report bundle and dissertation scoreboard; **skips** XAI/SHAP and robustness to save time; still writes PR-curve and confusion-matrix figures below):
+```bash
+python run_benchmark.py --dissertation-core
 ```
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/dissertation_scoreboard.csv`, `dissertation_scoreboard.md`, and `dissertation_scoreboard.tex` — dissertation Table 8.2 style baseline scoreboard (F1-macro / F1-weighted, PR-AUC, MCC, balanced accuracy; Markdown/LaTeX bold best column values)
 - `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.md`
-- `results/benchmark_YYYYMMDD_HHMMSS/benchmark_report.txt` (compatibility mirror)
-- `results/benchmark_YYYYMMDD_HHMMSS/performance_comparison.png`
+- `results/benchmark_YYYYMMDD_HHMMSS/pr_curves_comparison.png` — test-set Precision-Recall curves for the top 3 models by scoreboard order (F1-Macro, ROC-AUC); legend includes PR-AUC per model; dashed line = positive-class prevalence on the test set
+- `results/benchmark_YYYYMMDD_HHMMSS/confusion_matrix_best_model_normalized.png` — normalized by true label (rows sum to 1); best model by scoreboard; rows = True label, columns = Predicted label; class order Human, Bot
+- `results/benchmark_YYYYMMDD_HHMMSS/confusion_matrix_best_model_raw.png` — raw-count companion (same axes/order)
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
-- `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` - runtime, dataset, package, git, and artifact provenance
 - `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata (includes per-model `hpo` audit when tuning ran)
 - `results/benchmark_YYYYMMDD_HHMMSS/hpo_summary.json` — cache hit vs fresh study, trial counts, best `val_f1`, artifact paths
@@ -103,11 +107,12 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level attack metrics
-- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature attack metrics
-- `results/benchmark_YYYYMMDD_HHMMSS/shap_rank_stability.csv` — SHAP stability rows when available
-- `results/benchmark_YYYYMMDD_HHMMSS/feature_resilience_scores.csv` — FRS values when SHAP succeeds
-- `results/benchmark_YYYYMMDD_HHMMSS/shap_pivot_features.csv` — features that gain or lose explanatory prominence
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level flip / confidence metrics on true bots
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature single-attack metrics
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_degradation.csv` — Macro-F1 and PR-AUC on the full test set (baseline vs each adversarial profile; bots perturbed only)
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_profile_degradation.png` — grouped Macro-F1 bars for top-3 scoreboard models (baseline, `cheap_only`, `realistic_mixed`)
+- `results/benchmark_YYYYMMDD_HHMMSS/top_feature_vulnerabilities.csv` — top flip-rate features for the best model (single-feature attacks)
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_flip_rates_best_model.png` — horizontal bar chart companion to the CSV above
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` — machine-readable robustness summary
 
 ### Single Model Pipeline
@@ -128,11 +133,11 @@ HPO defaults are in `config/config.py` under `hpo.*` (enabled by default). A run
 
 ### Benchmarking and Explainability
 ```bash
-python run_benchmark.py --explain --save-plots
+python run_benchmark.py --explain
 ```
 
 Explainability runs when either `--explain` is passed or `explainability.enabled` is `true` in the loaded config.
-`--save-plots` forces plot saving on from the CLI, but plots can also be saved through `output.save_plots` in config.
+Passing `--explain` also sets `output.save_plots` so XAI PNG exports (e.g. `feature_importance_comparison.png`) are written; you can toggle `output.save_plots` in config alone if needed.
 
 Options:
 - `--config`: load YAML or JSON config
@@ -141,7 +146,6 @@ Options:
 - `--no-tune` / `--retune` / `--hpo-trials`: same semantics as `main.py` (per-model HPO before training)
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
-- `--robustness-max-shap-samples`: cap SHAP rows used during robustness analysis
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
