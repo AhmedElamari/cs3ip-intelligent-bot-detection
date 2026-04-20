@@ -27,6 +27,8 @@ class _PlotStub:
 
 
 class _FinalOutputStub:
+    results = {}
+
     def __init__(self, save_exc=None, report="report", write_results=False):
         self._save_exc = save_exc
         self._report = report
@@ -42,6 +44,26 @@ class _FinalOutputStub:
 
     def generate_report(self):
         return self._report
+
+
+class _FinalOutputStubWithScoreboard(_FinalOutputStub):
+    """Stub with populated ``results`` so dissertation scoreboard files are emitted."""
+
+    results = {
+        "logistic_regression": {
+            "training_time": 1.234,
+            "test_metrics": {
+                "precision": 0.7,
+                "recall": 0.8,
+                "f1_macro": 0.75,
+                "f1_weighted": 0.76,
+                "pr_auc": 0.77,
+                "roc_auc": 0.78,
+                "mcc": 0.12,
+                "balanced_accuracy": 0.79,
+            },
+        }
+    }
 
 
 class OutputUtilsTest(unittest.TestCase):
@@ -142,6 +164,38 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("run_metadata.json", metadata["artifacts"]["files"])
             self.assertIn("config.json", metadata["artifacts"]["files"])
             self.assertIn("model_comparison.csv", metadata["artifacts"]["files"])
+
+    def test_save_final_outputs_writes_dissertation_scoreboard(self):
+        with TemporaryDirectory() as tmp:
+            config = Config()
+            output_dir = Path(tmp)
+            with mock.patch(
+                "benchmarking.run_metadata._git_metadata",
+                return_value={"commit": "abc123", "branch": "main", "dirty": False},
+            ), mock.patch(
+                "benchmarking.run_metadata._dataset_metadata",
+                return_value={
+                    "root": str(output_dir),
+                    "combined_sha256": "dataset-hash",
+                    "files": {},
+                },
+            ), mock.patch(
+                "benchmarking.run_metadata._package_versions",
+                return_value={"numpy": "1.0.0"},
+            ):
+                save_final_outputs(
+                    _FinalOutputStubWithScoreboard(report="# report", write_results=True),
+                    output_dir,
+                    config,
+                    self._build_run_context(output_dir),
+                )
+
+            self.assertTrue((output_dir / "dissertation_scoreboard.csv").exists())
+            self.assertTrue((output_dir / "dissertation_scoreboard.md").exists())
+            self.assertTrue((output_dir / "dissertation_scoreboard.tex").exists())
+            csv_text = (output_dir / "dissertation_scoreboard.csv").read_text(encoding="utf-8")
+            self.assertIn("logistic_regression", csv_text)
+            self.assertIn("PR-AUC", csv_text)
 
 
 if __name__ == "__main__":

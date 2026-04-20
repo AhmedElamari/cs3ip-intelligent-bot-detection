@@ -10,10 +10,10 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from .dissertation_scoreboard import SCOREBOARD_METRIC_KEYS as SCOREBOARD_METRICS
 from .metrics import MetricsCalculator
 from .output_formatting import format_frame_for_export, format_payload_for_export
 from benchmarking.hpo.input_prep import build_model_inputs
-
 
 
 DEFAULT_METRICS = {
@@ -342,6 +342,11 @@ class ModelBenchmark:
                     row[metric.upper()] = result[metric_key][metric]
             rows.append(row)
         return pd.DataFrame(rows)
+
+    def get_scoreboard_table(self, dataset: str = "test") -> pd.DataFrame:
+        from benchmarking.dissertation_scoreboard import build_scoreboard
+
+        return build_scoreboard(self, dataset=dataset)
 
     def get_best_model(self, metric: str = "f1", dataset: str = "test") -> tuple:
         ranked_results = self._ranked_result_items(sort_by=metric, dataset=dataset)

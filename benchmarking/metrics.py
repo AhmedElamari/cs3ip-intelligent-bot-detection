@@ -17,7 +17,9 @@ class MetricsCalculator:
         'accuracy': 'Overall correctness of predictions',
         'precision': 'Proportion of predicted bots that are actual bots',
         'recall': 'Proportion of actual bots correctly identified (sensitivity)',
-        'f1': 'Harmonic mean of precision and recall',
+        'f1': 'Harmonic mean of precision and recall (binary positive class)',
+        'f1_macro': 'Unweighted mean of per-class F1 scores',
+        'f1_weighted': 'Support-weighted mean of per-class F1 scores',
         'specificity': 'Proportion of actual humans correctly identified',
         'balanced_accuracy': 'Average of recall for each class',
         'roc_auc': 'Area under ROC curve (ranking quality)',
@@ -64,6 +66,8 @@ class MetricsCalculator:
         metrics['precision'] = precision_score(y_true, y_pred, average='binary', zero_division=0)
         metrics['recall'] = recall_score(y_true, y_pred, average='binary', zero_division=0)
         metrics['f1'] = f1_score(y_true, y_pred, average='binary', zero_division=0)
+        metrics['f1_macro'] = f1_score(y_true, y_pred, average='macro', zero_division=0)
+        metrics['f1_weighted'] = f1_score(y_true, y_pred, average='weighted', zero_division=0)
         
         # Confusion matrix derived
         tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -401,6 +405,8 @@ class MetricsCalculator:
             'precision': lambda yt, yp: precision_score(yt, yp, average='binary', zero_division=0),
             'recall': lambda yt, yp: recall_score(yt, yp, average='binary', zero_division=0),
             'f1': lambda yt, yp: f1_score(yt, yp, average='binary', zero_division=0),
+            'f1_macro': lambda yt, yp: f1_score(yt, yp, average='macro', zero_division=0),
+            'f1_weighted': lambda yt, yp: f1_score(yt, yp, average='weighted', zero_division=0),
             'balanced_accuracy': balanced_accuracy_score,
             'mcc': matthews_corrcoef,
         }
