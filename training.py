@@ -78,8 +78,8 @@ def train_and_evaluate(
         model.prepare_eval_set(prep.X_val, y_val)
 
     fit_names = feature_names
-    if model_type == "tabnet" and prep.tabnet_meta is not None:
-        fit_names = prep.tabnet_meta.feature_names or feature_names
+    if model_type == "tabnet" and not fit_names and prep.tabnet_meta is not None:
+        fit_names = prep.tabnet_meta.feature_names
 
     print(f"\nTraining {model_type}...")
     model.fit(prep.X_train, y_train, feature_names=fit_names)
