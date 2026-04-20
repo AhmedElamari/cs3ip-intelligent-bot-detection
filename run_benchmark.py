@@ -10,9 +10,13 @@ Usage:
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
+from sklearn.utils.class_weight import compute_class_weight
 
 from config import Config, load_config
 from benchmarking import ModelBenchmark
@@ -22,9 +26,21 @@ from benchmarking.output_utils import save_comparison_outputs, save_final_output
 from benchmarking.robustness import run_robustness_analysis
 from benchmarking.run_metadata import BenchmarkRunContext
 from benchmarking.xai_reporting import run_explainability_analysis
+from benchmarking.hpo.service import (
+    HPOCliOverrides,
+    merge_hpo_into_config_params,
+    resolve_hpo,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
+
+
+def _balanced_class_weights(y: np.ndarray) -> dict[int, float]:
+    y = np.asarray(y).astype(int)
+    classes = np.unique(y)
+    weights = compute_class_weight("balanced", classes=classes, y=y)
+    return {int(c): float(w) for c, w in zip(classes, weights)}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -106,6 +122,22 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help='Override SHAP sample cap for robustness analysis'
     )
+    parser.add_argument(
+        '--no-tune',
+        action='store_true',
+        help='Skip hyperparameter optimisation; use config params only',
+    )
+    parser.add_argument(
+        '--retune',
+        action='store_true',
+        help='Ignore HPO cache and run a fresh Optuna study',
+    )
+    parser.add_argument(
+        '--hpo-trials',
+        type=int,
+        default=None,
+        help='Override number of Optuna trials per model for this run',
+    )
     return parser
 
 
@@ -133,6 +165,9 @@ def _resolve_explainability_audit(args: argparse.Namespace, config: Config) -> d
 def main():
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.no_tune and args.retune:
+        parser.error("Cannot use --no-tune together with --retune")
 
     if args.config:
         config = load_config(args.config)
@@ -165,12 +200,12 @@ def main():
 
     enabled_models = config.get_enabled_models()
     scale_from_config = config.get('preprocessing.scale_features')
-    scaled_models = {'logistic_regression', 'svm', 'tabnet'}
+    scaled_models = {'logistic_regression', 'svm'}
     needs_scaling = any(m in enabled_models for m in scaled_models)
     if not scale_from_config and needs_scaling:
         config.set('preprocessing.scale_features', True)
         print(
-            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm/tabnet enabled; "
+            "\n[Compatibility] Scaling disabled by config but logistic_regression/svm enabled; "
             "auto-restoring scaling for those models."
         )
 
@@ -196,12 +231,52 @@ def main():
 
     X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(data_splits, config)
 
+    cw = _balanced_class_weights(y_train)
+    scale_flag = bool(config.get('preprocessing.scale_features'))
+    hpo_summaries: dict[str, dict] = {}
+    for model_name in list(config.get_enabled_models()):
+        hpo_enable_scaling = scale_flag and model_name in (
+            "logistic_regression",
+            "svm",
+        )
+        hpo_result, audit = resolve_hpo(
+            model_name,
+            config,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            feature_names_ordered=list(feature_names),
+            data_dir=TWIBOT20_DATA_DIR,
+            enable_scaling=hpo_enable_scaling,
+            class_weights=cw,
+            cli=HPOCliOverrides(
+                no_tune=args.no_tune,
+                retune=args.retune,
+                hpo_trials=args.hpo_trials,
+            ),
+        )
+        hpo_summaries[model_name] = {**audit, "best_score": hpo_result.get("best_score")}
+        if hpo_result.get("status") != "skipped" and hpo_result.get("best_params"):
+            merge_hpo_into_config_params(config, model_name, hpo_result["best_params"])
+
+    summary_path = output_dir / "hpo_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {"schema_version": "HPOSummaryV1", "models": hpo_summaries},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"\nHPO summary written to: {summary_path}")
+
     models = create_models(config)
 
     benchmark = ModelBenchmark(
         models=models,
         experiment_name=f'benchmark_{timestamp}'
     )
+    benchmark.hpo_audit_by_model = hpo_summaries
 
     benchmark.run_benchmark(
         X_train, y_train,
