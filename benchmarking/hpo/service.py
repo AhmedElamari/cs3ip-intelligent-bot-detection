@@ -110,6 +110,7 @@ def optimize_model(
     feature_names: Optional[list[str]] = None,
     output_path: Optional[Path] = None,
     device: str = "auto",
+    entry: Optional[Any] = None,
 ) -> dict[str, Any]:
     """
     Run Optuna HPO for ``model_name``; return HPOResultV1 dict.
@@ -117,7 +118,7 @@ def optimize_model(
     optuna = require_optuna()
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-    entry = get_hpo_entry(model_name)
+    entry = entry or get_hpo_entry(model_name)
     if entry.requires_dl:
         require_tabnet_dl()
 
@@ -127,17 +128,17 @@ def optimize_model(
 
     y_tr = np.asarray(y_train, dtype=int)
     y_v = np.asarray(y_val, dtype=int)
+    prep = build_model_inputs(
+        model_name,
+        X_train,
+        X_val,
+        X_val,
+        enable_scaling=enable_scaling,
+    )
 
     def objective(trial: Any) -> float:
         suggested = entry.suggest_fn(trial)
         merged = {**base_params, **suggested}
-        prep = build_model_inputs(
-            model_name,
-            X_train,
-            X_val,
-            X_val,
-            enable_scaling=enable_scaling,
-        )
         return _fit_and_val_f1(
             model_name,
             merged,
@@ -270,6 +271,8 @@ def resolve_hpo(
                 "Disable tuning with --no-tune or add a registry entry."
             ) from exc
         raise
+    if entry.requires_dl:
+        require_tabnet_dl()
 
     sig = compute_signature(
         model_name,
@@ -305,6 +308,7 @@ def resolve_hpo(
         class_weights=class_weights,
         feature_names=feature_names_ordered,
         output_path=out_path,
+        entry=entry,
     )
     audit["trial_count"] = int(result.get("trial_count", n_trials))
     audit["best_score"] = result.get("best_score")

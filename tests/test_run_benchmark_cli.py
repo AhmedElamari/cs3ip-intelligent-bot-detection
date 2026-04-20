@@ -37,7 +37,13 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
         )
         return config_path
 
-    def _run_main(self, *, explain_flag: bool, config_enabled: Optional[bool]):
+    def _run_main(
+        self,
+        *,
+        explain_flag: bool,
+        config_enabled: Optional[bool],
+        no_tune: bool = False,
+    ):
         with TemporaryDirectory(dir=ROOT) as tmp:
             tmp_path = Path(tmp)
             output_root = tmp_path / "results"
@@ -50,6 +56,8 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
             ]
             if explain_flag:
                 argv.append("--explain")
+            if no_tune:
+                argv.append("--no-tune")
             if config_enabled is not None:
                 argv.extend(["--config", str(self._write_config(tmp_path, config_enabled))])
 
@@ -178,6 +186,15 @@ class RunBenchmarkCliContractTest(unittest.TestCase):
             xai_enabled=False,
             effective_source="disabled",
         )
+
+    def test_no_tune_does_not_require_hpo_registry_entry(self):
+        self.assertFalse(hasattr(run_benchmark, "get_hpo_entry"))
+        result = self._run_main(
+            explain_flag=False,
+            config_enabled=False,
+            no_tune=True,
+        )
+        self.assertFalse(result["xai_called"])
 
 
 if __name__ == "__main__":

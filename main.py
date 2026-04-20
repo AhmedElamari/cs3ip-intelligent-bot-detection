@@ -15,10 +15,8 @@ from config import Config
 from benchmarking.hpo.service import (
     HPOCliOverrides,
     merge_hpo_into_config_params,
-    require_tabnet_dl,
     resolve_hpo,
 )
-from benchmarking.hpo.registry import get as get_hpo_entry
 from DataLoader import load_twibot_splits_as_dict
 from FeatureEngineering import BotFeatureExtractor, derive_reference_date
 from Preprocessing import BotDetector
@@ -209,10 +207,6 @@ def run_pipeline(
     print(f"\nClass weights: {class_weights}")
 
     live_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else feature_names
-
-    entry = get_hpo_entry(model_type)
-    if entry.requires_dl:
-        require_tabnet_dl()
 
     hpo_result, hpo_audit = resolve_hpo(
         model_type,

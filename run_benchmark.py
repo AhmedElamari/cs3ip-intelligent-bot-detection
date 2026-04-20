@@ -26,11 +26,9 @@ from benchmarking.output_utils import save_comparison_outputs, save_final_output
 from benchmarking.robustness import run_robustness_analysis
 from benchmarking.run_metadata import BenchmarkRunContext
 from benchmarking.xai_reporting import run_explainability_analysis
-from benchmarking.hpo.registry import get as get_hpo_entry
 from benchmarking.hpo.service import (
     HPOCliOverrides,
     merge_hpo_into_config_params,
-    require_tabnet_dl,
     resolve_hpo,
 )
 
@@ -237,9 +235,6 @@ def main():
     scale_flag = bool(config.get('preprocessing.scale_features'))
     hpo_summaries: dict[str, dict] = {}
     for model_name in list(config.get_enabled_models()):
-        entry = get_hpo_entry(model_name)
-        if entry.requires_dl:
-            require_tabnet_dl()
         hpo_enable_scaling = scale_flag and model_name in (
             "logistic_regression",
             "svm",
