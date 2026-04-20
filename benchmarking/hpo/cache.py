@@ -53,6 +53,7 @@ def compute_signature(
         "feature_selection": _feature_selection_fingerprint(prep),
         "metric": metric,
         "model_name": model_name,
+        "model_params": config.get_model_params(model_name),
         "random_state": cfg_dict.get("random_state"),
         "search_space_version": search_space_version,
         "effective_preprocessing": _effective_preprocessing_subset(cfg_dict),

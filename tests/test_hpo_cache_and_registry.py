@@ -40,6 +40,20 @@ class TestHPOCacheSignature(unittest.TestCase):
         s2 = compute_signature("random_forest", cfg, names, data_dir, "v2")
         self.assertNotEqual(s1, s2)
 
+    def test_signature_changes_when_fixed_model_params_change(self):
+        cfg_a = Config()
+        cfg_b = Config()
+        names = ["f1"]
+        data_dir = Path(__file__).resolve().parents[1] / "data"
+
+        cfg_a.set("models.tabnet.params.max_epochs", 200)
+        cfg_b.set("models.tabnet.params.max_epochs", 500)
+
+        s1 = compute_signature("tabnet", cfg_a, names, data_dir, "v1")
+        s2 = compute_signature("tabnet", cfg_b, names, data_dir, "v1")
+
+        self.assertNotEqual(s1, s2)
+
 
 class TestHPORegistrySuggestConstructs(unittest.TestCase):
     """Each registry entry's suggested params must construct the wrapper."""
