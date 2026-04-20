@@ -39,6 +39,7 @@ class RandomForestModel(BaseModel):
             'max_depth': kwargs.get('max_depth', 10),
             'min_samples_split': kwargs.get('min_samples_split', 2),
             'min_samples_leaf': kwargs.get('min_samples_leaf', 1),
+            'max_features': kwargs.get('max_features', 'sqrt'),
             'class_weight': kwargs.get('class_weight', 'balanced'),
             'n_jobs': kwargs.get('n_jobs', -1),
             'oob_score': kwargs.get('oob_score', True),

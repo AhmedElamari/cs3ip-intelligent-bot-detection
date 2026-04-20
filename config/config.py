@@ -145,6 +145,30 @@ class Config:
             'output_dir': 'results',
             'experiment_name': None,
         },
+
+        'hpo': {
+            'enabled': True,
+            'reuse_cache': True,
+            'metric': 'val_f1',
+            'fail_fast': True,
+            'cache_dir': 'results/hpo_cache',
+            'sampler_seed': 2112,
+            'trials_per_model': {
+                'logistic_regression': 15,
+                'svm': 20,
+                'decision_tree': 15,
+                'random_forest': 20,
+                'xgboost': 25,
+                'tabnet': 30,
+            },
+            'pruning': {
+                'tabnet': {
+                    'type': 'median',
+                    'n_startup_trials': 5,
+                    'n_warmup_steps': 0,
+                },
+            },
+        },
     }
     
     def __init__(self, config_dict: Dict[str, Any] = None):
@@ -230,6 +254,15 @@ class Config:
             name for name, config in models_config.items()
             if config.get('enabled', True)
         ]
+
+    def get_hpo(self, model_name: Optional[str] = None) -> Dict[str, Any]:
+        """Return a copy of the ``hpo`` section; optional per-model trial budget."""
+        hpo = copy.deepcopy(self.get('hpo', {}))
+        if model_name:
+            tpm = hpo.get('trials_per_model') or {}
+            if model_name in tpm:
+                hpo['trials_for_model'] = tpm[model_name]
+        return hpo
     
     def to_dict(self) -> Dict[str, Any]:
         """Get full configuration as dictionary."""
@@ -435,6 +468,26 @@ output:
   save_plots: true
   output_dir: results
   experiment_name: null
+
+hpo:
+  enabled: true
+  reuse_cache: true
+  metric: val_f1
+  fail_fast: true
+  cache_dir: results/hpo_cache
+  sampler_seed: 2112
+  trials_per_model:
+    logistic_regression: 15
+    svm: 20
+    decision_tree: 15
+    random_forest: 20
+    xgboost: 25
+    tabnet: 30
+  pruning:
+    tabnet:
+      type: median
+      n_startup_trials: 5
+      n_warmup_steps: 0
 """
 
 

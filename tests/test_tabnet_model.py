@@ -19,6 +19,8 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from types import ModuleType
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -116,6 +118,23 @@ class TabNetSafeBatchSizesTest(unittest.TestCase):
         from models.tabnet import TabNetModel
         _, vbs = TabNetModel._safe_batch_sizes(3, 3, 128)
         self.assertGreaterEqual(vbs, 1)
+
+    def test_create_model_forwards_device_name(self):
+        from models.tabnet import TabNetModel
+
+        fake_module = ModuleType("pytorch_tabnet.tab_model")
+        captured = {}
+
+        class FakeTabNetClassifier:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+        fake_module.TabNetClassifier = FakeTabNetClassifier
+        with mock.patch.dict(sys.modules, {"pytorch_tabnet.tab_model": fake_module}):
+            model = TabNetModel(device_name="cuda")
+            model._create_model(**model.get_params())
+
+        self.assertEqual(captured.get("device_name"), "cuda")
 
 
 class SampleWeightsTest(unittest.TestCase):

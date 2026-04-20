@@ -9,7 +9,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Train/validation/test splits with reproducible random state
 - Multiple supervised models with a common interface (LR, RF, XGBoost, SVM, DT, TabNet)
 - **TabNet deep learning model** — sequential attention with intrinsic interpretability (feature masks)
-- Balanced hyperparameter optimisation for TabNet via Optuna (40-60 trial balanced search)
+- **Generalised Optuna HPO** for all registered models (`logistic_regression`, `svm`, `decision_tree`, `random_forest`, `xgboost`, `tabnet`) with `val_f1` on the train/val split, TPE sampler (seed 2112), cached `HPOResultV1` artifacts under `results/hpo_cache/<model>/<sha256>.json`
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
@@ -27,7 +27,7 @@ cs3ip-intelligent-bot-detection/
 |-- config/
 |   |-- config.py                 # Config management
 |-- models/                       # Model implementations
-|-- benchmarking/                 # Benchmark runner and metrics
+|-- benchmarking/                 # Benchmark runner, metrics, `hpo/` shared Optuna service
 |-- explainability/               # SHAP/LIME/feature importance tools
 |-- tests/                        # Smoke tests
 |-- results/                      # Generated outputs (gitignored)
@@ -49,7 +49,7 @@ Optional XAI tooling:
 pip install shap lime matplotlib seaborn
 ```
 
-Optional deep-learning profile (TabNet + HPO):
+**Optuna** is included in `requirements.txt` for model HPO. Optional deep-learning profile (TabNet training):
 ```bash
 # CPU
 pip install -r requirements-dl.txt
@@ -96,7 +96,9 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` - runtime, dataset, package, git, and artifact provenance
-- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata
+- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata (includes per-model `hpo` audit when tuning ran)
+- `results/benchmark_YYYYMMDD_HHMMSS/hpo_summary.json` — cache hit vs fresh study, trial counts, best `val_f1`, artifact paths
+- `results/hpo_cache/<model>/<signature>.json` — persisted `HPOResultV1` for reuse when the run signature matches
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
@@ -117,6 +119,11 @@ Options:
 - `--smote`: enable SMOTE
 - `--scale`: enable feature scaling
 - `--features`: select top-k features
+- `--no-tune`: skip HPO; use hyperparameters from config only
+- `--retune`: ignore the HPO cache and run a fresh Optuna study
+- `--hpo-trials N`: override trial count for this run (otherwise `config.hpo.trials_per_model.<model>`)
+
+HPO defaults are in `config/config.py` under `hpo.*` (enabled by default). A run summary is written to `results/hpo_summary.json`.
 
 ### Benchmarking and Explainability
 ```bash
@@ -130,19 +137,34 @@ Options:
 - `--config`: load YAML or JSON config
 - `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost tabnet`)
 - `--smote` / `--scale`: override preprocessing settings
+- `--no-tune` / `--retune` / `--hpo-trials`: same semantics as `main.py` (per-model HPO before training)
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
 - `--robustness-max-shap-samples`: cap SHAP rows used during robustness analysis
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
-### TabNet Hyperparameter Optimisation
-Run balanced Optuna HPO (40-60 trials) for TabNet before or after a benchmark:
+**Metric note:** HPO maximises **validation F1** (`val_f1`). The printed `[BEST]` benchmark line still ranks models by **test F1** (existing `get_best_model('f1')` default).
+
+### Hyperparameter search spaces (v1)
+
+| Model | Tuned hyperparameters |
+|-------|------------------------|
+| `logistic_regression` | `C`, `solver` |
+| `svm` | `C`, `kernel`, `gamma` (mode-dependent) |
+| `decision_tree` | `max_depth`, `min_samples_split`, `min_samples_leaf`, `criterion` |
+| `random_forest` | `n_estimators`, `max_depth`, `min_samples_split`, `min_samples_leaf`, `max_features` |
+| `xgboost` | `n_estimators`, `learning_rate`, `max_depth`, `subsample`, `colsample_bytree`, `reg_alpha`, `reg_lambda` |
+| `tabnet` | Same ranges as legacy TabNet HPO (`n_d`/`n_a`, `n_steps`, `gamma`, `lambda_sparse`, `learning_rate`, batch sizes, `momentum`, `mask_type`; MedianPruner) |
+
+Programmatic TabNet-only entry point (delegates to the shared service):
+
 ```python
 from benchmarking.tabnet_optuna import optimize_tabnet
 result = optimize_tabnet(X_train, y_train, X_val, y_val, n_trials=50, output_path="results/hpo.json")
 ```
-The best params are saved as a validated `HPOResultV1` JSON artifact and can be loaded back via `load_hpo_result("results/hpo.json")`.
+
+Artifacts are `HPOResultV1` JSON; load with `load_hpo_result(path)`.
 
 ## Configuration
 Configuration is centralized in `config/config.py` and supports YAML/JSON. Use `create_default_config()` to generate a template file and adjust model parameters, preprocessing options, explainability settings, and the optional `robustness.*` controls.

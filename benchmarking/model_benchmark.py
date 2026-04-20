@@ -5,13 +5,14 @@ from datetime import datetime
 import json
 from pathlib import Path
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 from .metrics import MetricsCalculator
 from .output_formatting import format_frame_for_export, format_payload_for_export
+from benchmarking.hpo.input_prep import build_model_inputs
 
 
 
@@ -55,6 +56,7 @@ class ModelBenchmark:
         self.base_y_train: Optional[np.ndarray] = None
         self.base_feature_names: List[str] = []
         self.robustness_summary: Optional[pd.DataFrame] = None
+        self.hpo_audit_by_model: Dict[str, Dict[str, Any]] = {}
 
     def add_model(self, name: str, model: Any) -> "ModelBenchmark":
         self.models[name] = model
@@ -95,29 +97,36 @@ class ModelBenchmark:
         self.base_y_train = np.asarray(y_train)
         self.base_feature_names = list(feature_names or [])
 
-        scaled_models = {"logistic_regression", "svm"}
-
         for name, model in self.models.items():
             if verbose:
                 print(f"\n{'-' * 40}")
                 print(f"Training: {name}")
                 print(f"{'-' * 40}")
 
-            X_train_model, X_val_model, X_test_model, scaler = self._prepare_model_inputs(
-                model_name=name,
-                X_train=X_train,
-                X_val=X_val,
-                X_test=X_test,
+            if enable_scaling and name in ("logistic_regression", "svm") and verbose:
+                print("  (Applying feature scaling)")
+
+            prep = build_model_inputs(
+                name,
+                X_train,
+                X_val,
+                X_test,
                 enable_scaling=enable_scaling,
-                scaled_models=scaled_models,
-                verbose=verbose,
             )
+            X_train_model = prep.X_train
+            X_val_model = prep.X_val
+            X_test_model = prep.X_test
+            scaler = prep.scaler
+
+            fit_feature_names = feature_names
+            if name == "tabnet" and prep.tabnet_meta is not None:
+                fit_feature_names = prep.tabnet_meta.feature_names or feature_names
 
             if hasattr(model, "prepare_eval_set"):
                 model.prepare_eval_set(X_val_model, y_val)
 
             start_time = time.time()
-            model.fit(X_train_model, y_train, feature_names=feature_names)
+            model.fit(X_train_model, y_train, feature_names=fit_feature_names)
             training_time = time.time() - start_time
             self.training_times[name] = training_time
 
@@ -714,16 +723,6 @@ class ModelBenchmark:
         return resolved
 
     @staticmethod
-    def _scale_features(X_train, X_val, X_test):
-        from sklearn.preprocessing import StandardScaler
-
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_val_scaled = scaler.transform(X_val)
-        X_test_scaled = scaler.transform(X_test)
-        return X_train_scaled, X_val_scaled, X_test_scaled, scaler
-
-    @staticmethod
     def _copy_input(data: Union[np.ndarray, pd.DataFrame]) -> Union[np.ndarray, pd.DataFrame]:
         return data.copy() if hasattr(data, "copy") else np.array(data, copy=True)
 
@@ -742,23 +741,6 @@ class ModelBenchmark:
                 f"{missing}"
             )
         return X_eval.loc[:, feature_names]
-
-    @classmethod
-    def _prepare_model_inputs(
-        cls,
-        model_name: str,
-        X_train: np.ndarray,
-        X_val: np.ndarray,
-        X_test: np.ndarray,
-        enable_scaling: bool,
-        scaled_models: Set[str],
-        verbose: bool,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Any]:
-        if enable_scaling and model_name in scaled_models:
-            if verbose:
-                print("  (Applying feature scaling)")
-            return cls._scale_features(X_train, X_val, X_test)
-        return X_train, X_val, X_test, None
 
     @staticmethod
     def _safe_length(data: Optional[Union[np.ndarray, pd.DataFrame]]) -> int:
@@ -832,7 +814,7 @@ class ModelBenchmark:
             "models": {},
         }
         for rank, (name, result) in enumerate(ranked_results, start=1):
-            payload["models"][name] = {
+            entry = {
                 "rank": rank,
                 "training_time": result["training_time"],
                 "val_metrics": result["val_metrics"],
@@ -841,4 +823,7 @@ class ModelBenchmark:
                 "confidence_intervals": self.confidence_intervals.get(name, {}),
                 "feature_importance_available": result["feature_importance"] is not None,
             }
+            if name in self.hpo_audit_by_model:
+                entry["hpo"] = self.hpo_audit_by_model[name]
+            payload["models"][name] = entry
         return payload
