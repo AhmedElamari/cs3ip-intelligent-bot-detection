@@ -89,6 +89,7 @@ class TabNetModel(BaseModel):
             "gamma": kwargs.get("gamma", 1.3),
             "lambda_sparse": kwargs.get("lambda_sparse", 1e-3),
             "learning_rate": kwargs.get("learning_rate", 2e-2),
+            "device_name": kwargs.get("device_name", "auto"),
             "batch_size": kwargs.get("batch_size", 1024),
             "virtual_batch_size": kwargs.get("virtual_batch_size", 128),
             "momentum": kwargs.get("momentum", 0.02),
@@ -124,6 +125,7 @@ class TabNetModel(BaseModel):
             cat_dims=kwargs.get("cat_dims", []),
             momentum=kwargs["momentum"],
             mask_type=kwargs["mask_type"],
+            device_name=kwargs.get("device_name", "auto"),
             seed=seed,
             verbose=0,
         )

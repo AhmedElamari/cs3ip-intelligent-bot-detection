@@ -80,8 +80,8 @@ def _fit_and_val_f1(
         tabnet_meta=prep.tabnet_meta,
     )
     fit_names = feature_names
-    if model_name == "tabnet" and prep.tabnet_meta is not None:
-        fit_names = prep.tabnet_meta.feature_names or feature_names
+    if model_name == "tabnet" and not fit_names and prep.tabnet_meta is not None:
+        fit_names = prep.tabnet_meta.feature_names
 
     if hasattr(model, "prepare_eval_set"):
         model.prepare_eval_set(prep.X_val, y_val)
@@ -123,6 +123,10 @@ def optimize_model(
         require_tabnet_dl()
 
     base_params = config.get_model_params(model_name)
+    resolved_device = device
+    if model_name == "tabnet":
+        resolved_device = _device_string() if device == "auto" else device
+        base_params = {**base_params, "device_name": resolved_device}
     if class_weights is not None:
         base_params = {**base_params, "class_weight": class_weights}
 
@@ -138,6 +142,7 @@ def optimize_model(
 
     def objective(trial: Any) -> float:
         suggested = entry.suggest_fn(trial)
+        trial.set_user_attr("model_params", dict(suggested))
         merged = {**base_params, **suggested}
         return _fit_and_val_f1(
             model_name,
@@ -169,14 +174,9 @@ def optimize_model(
         warnings_list = [str(w.message) for w in caught]
 
     best = study.best_trial
-    best_params = dict(best.params)
+    best_params = dict(best.user_attrs.get("model_params") or best.params)
     if model_name == "tabnet":
         best_params = _postprocess_tabnet_best_params(best_params)
-
-    dev = device
-    if model_name == "tabnet":
-        if dev == "auto":
-            dev = _device_string()
 
     result: dict[str, Any] = {
         "schema_version": "HPOResultV1",
@@ -191,7 +191,7 @@ def optimize_model(
         "search_space_version": entry.search_space_version,
     }
     if model_name == "tabnet":
-        result["device"] = dev
+        result["device"] = resolved_device
 
     if output_path is not None:
         atomic_write_json(Path(output_path), result)
@@ -270,7 +270,23 @@ def resolve_hpo(
                 f"No HPO registry entry for model {model_name!r}. "
                 "Disable tuning with --no-tune or add a registry entry."
             ) from exc
-        raise
+        audit["skipped"] = True
+        audit["search_space_version"] = "missing"
+        return (
+            {
+                "schema_version": "HPOResultV1",
+                "status": "skipped",
+                "best_params": {},
+                "best_score": float("nan"),
+                "trial_count": 0,
+                "metric": "val_f1",
+                "seed": seed,
+                "warnings": [f"No HPO registry entry for model {model_name!r}."],
+                "model_name": model_name,
+                "search_space_version": "missing",
+            },
+            audit,
+        )
     if entry.requires_dl:
         require_tabnet_dl()
 

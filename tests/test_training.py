@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -112,6 +113,43 @@ class TrainingPipelineTest(unittest.TestCase):
                 model_type="random_forest",
                 class_weights=None
             )
+
+    def test_tabnet_prefers_caller_feature_names_over_placeholder_meta(self):
+        model = mock.Mock()
+        model.predict.return_value = self.np.zeros(len(self.X_val), dtype=int)
+        prep = mock.Mock(
+            X_train=self.X_train,
+            X_val=self.X_val,
+            X_test=self.X_test,
+            tabnet_meta=mock.Mock(feature_names=["feature_0", "feature_1"]),
+        )
+
+        with mock.patch("training.build_model_inputs", return_value=prep), mock.patch(
+            "training.build_model",
+            return_value=model,
+        ), mock.patch(
+            "training.classification_report",
+            return_value="report",
+        ), mock.patch(
+            "training.confusion_matrix",
+            return_value=self.np.array([[1, 0], [0, 1]]),
+        ):
+            self.train_and_evaluate(
+                self.X_train,
+                self.X_val,
+                self.X_test,
+                self.y_train,
+                self.y_val,
+                self.y_test,
+                model_type="tabnet",
+                class_weights={0: 1.0, 1: 1.0},
+                feature_names=["selected_a", "selected_b"],
+            )
+
+        self.assertEqual(
+            model.fit.call_args.kwargs["feature_names"],
+            ["selected_a", "selected_b"],
+        )
 
 
 if __name__ == "__main__":
