@@ -21,16 +21,30 @@ LABEL_MAP = {
     "has_extended_profile": "Extended profile", "geo_enabled": "Geo enabled",
     "protected": "Protected account", "tweet_count": "Tweet count (sample window)",
 }
+MODEL_LABELS = {
+    "xgboost": "XGBoost",
+    "random_forest": "Random Forest",
+    "logistic_regression": "Logistic Regression",
+    "decision_tree": "Decision Tree",
+    "naive_bayes": "Naive Bayes",
+}
 
-CAPTION = (
-    "Global SHAP beeswarm for XGBoost on the TwiBot-20 test split (top 10 features by mean |SHAP|). "
-    "Each dot is one account; horizontal position is that feature's contribution to the log-odds of "
-    '"bot", colour encodes feature value (red=high, blue=low). The model\'s decision is dominated by '
-    "profile-metadata signals — verified status, followers/friends ratio, and account-age-normalised "
-    "activity rates — rather than raw volume counters. The concentration of signal in a small band of "
-    "interpretable features supports the interpretability claim and means adversarial robustness hinges "
-    "on how easily an attacker can manipulate those specific profile attributes, not on hidden embeddings."
-)
+
+def _pretty_model_name(model_name: str) -> str:
+    return MODEL_LABELS.get(str(model_name), str(model_name).replace("_", " ").title())
+
+
+def _caption(model_name: str, top_n: int) -> str:
+    return (
+        f"Global SHAP beeswarm for {_pretty_model_name(model_name)} on the evaluation test split "
+        f"(top {top_n} features by mean |SHAP|). Each dot is one account; horizontal position is that "
+        'feature\'s contribution to the log-odds of "bot", colour encodes feature value '
+        "(red=high, blue=low). The model's decision is dominated by profile-metadata signals - "
+        "verified status, followers/friends ratio, and account-age-normalised activity rates - rather "
+        "than raw volume counters. The concentration of signal in a small band of interpretable "
+        "features supports the interpretability claim and means adversarial robustness hinges on how "
+        "easily an attacker can manipulate those specific profile attributes, not on hidden embeddings."
+    )
 
 
 def export_poster_shap(
@@ -48,7 +62,7 @@ def export_poster_shap(
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = f"shap_summary_{model_name}_poster"
-    (out / f"{stem}_caption.md").write_text(CAPTION + "\n", encoding="utf-8")
+    (out / f"{stem}_caption.md").write_text(_caption(model_name, top_n) + "\n", encoding="utf-8")
     display = [LABEL_MAP.get(str(n), str(n)) for n in feature_names]
     with mpl.rc_context({
         "font.size": 14, "axes.labelsize": 16, "axes.titlesize": 16,

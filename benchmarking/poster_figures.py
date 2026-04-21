@@ -101,61 +101,76 @@ def plot_degradation(models: Sequence[str], scenarios: Sequence[str], f1: np.nda
             label=SCENARIO_LABELS.get(scen, scen), edgecolor="white", linewidth=0.6,
         )
         if scen == "baseline":
-            for b in bars:
-                b.set_hatch("//")
+            for bar in bars:
+                bar.set_hatch("//")
         ax.bar_label(bars, labels=[f"{v:.2f}" if np.isfinite(v) else "" for v in col], padding=2, fontsize=10)
-        if si != bi:
-            d = col - f1[:, bi]
-            for i, bar in enumerate(bars):
-                if np.isfinite(d[i]):
-                    ax.annotate(
-                        f"Δ {d[i]:+.2f}",
-                        xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                        xytext=(0, 14), textcoords="offset points", ha="center", fontsize=9,
-                        color=PALETTE.get(scen, "#333333"), fontweight="bold",
-                    )
-    ax.set(ylabel="Macro-F1 (test set)", title="Macro-F1 drops under realistic adversarial profiles (bots perturbed)",
-           ylim=(0, 1.08), xticks=x, xticklabels=[MODEL_LABELS.get(m, pretty_model(m)) for m in models])
+        if si == bi:
+            continue
+        delta = col - f1[:, bi]
+        for idx, bar in enumerate(bars):
+            if np.isfinite(delta[idx]):
+                ax.annotate(
+                    f"Delta {delta[idx]:+.2f}",
+                    xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
+                    xytext=(0, 14),
+                    textcoords="offset points",
+                    ha="center",
+                    fontsize=9,
+                    color=PALETTE.get(scen, "#333333"),
+                    fontweight="bold",
+                )
+    ax.set(
+        ylabel="Macro-F1 (test set)",
+        title="Macro-F1 drops under realistic adversarial profiles (bots perturbed)",
+        ylim=(0, 1.08),
+        xticks=x,
+        xticklabels=[MODEL_LABELS.get(m, pretty_model(m)) for m in models],
+    )
     ax.grid(True, alpha=0.25, axis="y")
     ax.legend(loc="lower center", ncol=ns, bbox_to_anchor=(0.5, -0.22), frameon=False)
     return fig
 
 
-def _pr_cell(v: float) -> str:
-    return "not available" if not math.isfinite(float(v)) else f"{float(v):.2f}"
+def _pr_cell(value: float) -> str:
+    return "not available" if not math.isfinite(float(value)) else f"{float(value):.2f}"
 
 
 def degradation_caption(
     models: Sequence[str], scenarios: Sequence[str], pr: np.ndarray, pairwise: Sequence[Mapping[str, Any]],
 ) -> str:
-    sd = {s: SCENARIO_LABELS.get(s, s) for s in scenarios}
+    count = len(models)
+    model_phrase = f"top-{count} model{'s' if count != 1 else ''}" if count else "selected models"
+    ranked_phrase = (
+        "the highest-ranked model" if count == 1 else f"the {count} highest-ranked models"
+    ) if count else "the selected models"
+    scenario_labels = {scenario: SCENARIO_LABELS.get(scenario, scenario) for scenario in scenarios}
     pr_lines = "\n".join(
-        f"- **{MODEL_LABELS.get(m, pretty_model(m))}** — "
-        + ", ".join(f"{sd[s]} {_pr_cell(pr[mi, sj])}" for sj, s in enumerate(scenarios))
+        f"- **{MODEL_LABELS.get(model, pretty_model(model))}** - "
+        + ", ".join(f"{scenario_labels[scenario]} {_pr_cell(pr[mi, sj])}" for sj, scenario in enumerate(scenarios))
         + "."
-        for mi, m in enumerate(models)
+        for mi, model in enumerate(models)
     )
     body = (
-        "**Figure H1. Macro-F1 under clean vs adversarial conditions (top-3 models, TwiBot-20 test).**\n\n"
-        "Grouped bars show Macro-F1 for the three highest-ranked models on the baseline (clean) test set, "
-        "under cost-only cheap attacks, and under the realistic mixed profile. Attacks are applied only to "
-        "true-bot rows. Numeric labels show point Macro-F1; Δ values above attack bars show the drop "
-        "relative to that model's clean baseline.\n\n**PR-AUC by scenario:**\n\n" + pr_lines
+        f"**Figure H1. Macro-F1 under clean vs adversarial conditions ({model_phrase}, TwiBot-20 test).**\n\n"
+        f"Grouped bars show Macro-F1 for {ranked_phrase} on the baseline (clean) test set, under "
+        "cost-only cheap attacks, and under the realistic mixed profile. Attacks are applied only to "
+        "true-bot rows. Numeric labels show point Macro-F1; Delta values above attack bars show the "
+        "drop relative to that model's clean baseline.\n\n**PR-AUC by scenario:**\n\n" + pr_lines
     )
-    best_r, best_p = None, float("inf")
-    for r in pairwise or []:
-        if str(r.get("metric", "")) != "f1":
+    best_row, best_p = None, float("inf")
+    for row in pairwise or []:
+        if str(row.get("metric", "")) != "f1":
             continue
         try:
-            p = float(r.get("bootstrap_p_corrected", float("nan")))
+            p_value = float(row.get("bootstrap_p_corrected", float("nan")))
         except (TypeError, ValueError):
             continue
-        if math.isfinite(p) and p < best_p:
-            best_p, best_r = p, r
-    if best_r is not None and math.isfinite(best_p):
+        if math.isfinite(p_value) and p_value < best_p:
+            best_p, best_row = p_value, row
+    if best_row is not None and math.isfinite(best_p):
         body += (
-            f"\n\nPairwise clean-baseline significance (paired-bootstrap ΔF1, Holm–Bonferroni corrected): "
-            f"{best_r.get('model_a')} vs {best_r.get('model_b')}, p={best_p:.2g}. "
+            f"\n\nPairwise clean-baseline significance (paired-bootstrap Delta F1, Holm-Bonferroni corrected): "
+            f"{best_row.get('model_a')} vs {best_row.get('model_b')}, p={best_p:.2g}. "
             "Full pairwise table in `pairwise_significance.csv`."
         )
     return body + "\n"
@@ -169,8 +184,8 @@ def vulnerability_frame(df: pd.DataFrame, best_model: str, top_n: int) -> pd.Dat
     if out.empty:
         return out
     out["cost_tier"] = out["cost_tier"].fillna("cheap").astype(str).str.lower()
-    fn = out["feature"].astype(str)
-    out["display_feature"] = fn.map(FEATURE_LABELS).fillna(fn)
+    feature_names = out["feature"].astype(str)
+    out["display_feature"] = feature_names.map(FEATURE_LABELS).fillna(feature_names)
     return out
 
 
@@ -180,34 +195,46 @@ def plot_vulnerability(filtered: pd.DataFrame, best_model: str) -> mpl.figure.Fi
     y = np.arange(n)
     rates = filtered["flip_rate"].to_numpy()
     bars = ax.barh(
-        y, rates, color=[PALETTE.get(t, PALETTE["cheap"]) for t in filtered["cost_tier"]],
-        alpha=0.95, edgecolor="white", linewidth=0.6,
+        y,
+        rates,
+        color=[PALETTE.get(tier, PALETTE["cheap"]) for tier in filtered["cost_tier"]],
+        alpha=0.95,
+        edgecolor="white",
+        linewidth=0.6,
     )
-    ax.bar_label(bars, labels=[f"{100 * v:.0f}%" for v in rates], padding=3, fontsize=10)
+    ax.bar_label(bars, labels=[f"{100 * value:.0f}%" for value in rates], padding=3, fontsize=10)
     xmax = float(np.nanmax(rates)) if n else 0.0
-    nm = MODEL_LABELS.get(best_model, pretty_model(best_model))
-    ax.set(xlim=(0, min(1.0, xmax + 0.08)), xlabel="Flip rate on true bots (prediction bot → human)",
-           title=f"Attack surface by profile feature — {nm}", yticks=y,
-           yticklabels=filtered["display_feature"].astype(str).tolist())
+    model_label = MODEL_LABELS.get(best_model, pretty_model(best_model))
+    ax.set(
+        xlim=(0, min(1.0, xmax + 0.08)),
+        xlabel="Flip rate on true bots (prediction bot -> human)",
+        title=f"Attack surface by profile feature - {model_label}",
+        yticks=y,
+        yticklabels=filtered["display_feature"].astype(str).tolist(),
+    )
     ax.invert_yaxis()
     ax.grid(True, alpha=0.25, axis="x")
-    ax.legend(handles=[
-        Patch(color=PALETTE["cheap"], label="Cheap (profile edits)"),
-        Patch(color=PALETTE["expensive"], label="Expensive (followers/friends)"),
-    ], loc="lower right", frameon=False)
+    ax.legend(
+        handles=[
+            Patch(color=PALETTE["cheap"], label="Cheap (profile edits)"),
+            Patch(color=PALETTE["expensive"], label="Expensive (followers/friends)"),
+        ],
+        loc="lower right",
+        frameon=False,
+    )
     return fig
 
 
 def vulnerability_caption(filtered: pd.DataFrame, best_model: str) -> str:
-    nm = MODEL_LABELS.get(best_model, pretty_model(best_model))
-    c = filtered[filtered["cost_tier"] == "cheap"]["display_feature"].astype(str).head(3)
-    e = filtered[filtered["cost_tier"] == "expensive"]["display_feature"].astype(str).head(2)
-    ct = ", ".join(c) if len(c) else "none observed"
-    et = ", ".join(e) if len(e) else "none observed"
+    model_label = MODEL_LABELS.get(best_model, pretty_model(best_model))
+    cheap = filtered[filtered["cost_tier"] == "cheap"]["display_feature"].astype(str).head(3)
+    expensive = filtered[filtered["cost_tier"] == "expensive"]["display_feature"].astype(str).head(2)
+    cheap_text = ", ".join(cheap) if len(cheap) else "none observed"
+    expensive_text = ", ".join(expensive) if len(expensive) else "none observed"
     return (
-        f"**Figure V1. Single-feature attack surface — {nm}.**\n\n"
-        "Horizontal bars: fraction of true bots flipping bot→human under one perturbed profile attribute. "
+        f"**Figure V1. Single-feature attack surface - {model_label}.**\n\n"
+        "Horizontal bars: fraction of true bots flipping bot->human under one perturbed profile attribute. "
         "Colour = cost (cheap profile edits vs expensive follower/friend manipulation).\n\n"
         "This is an **attack surface**, not importance ranking; top rows are most gameable.\n\n"
-        f"**Top cheap levers:** {ct}.\n\n**Top expensive levers:** {et}.\n"
+        f"**Top cheap levers:** {cheap_text}.\n\n**Top expensive levers:** {expensive_text}.\n"
     )
