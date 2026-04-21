@@ -1,6 +1,8 @@
 """Tests for benchmark output utility helpers."""
 
+import ast
 import io
+import importlib
 import json
 import unittest
 from contextlib import redirect_stdout
@@ -11,16 +13,19 @@ from unittest import mock
 import numpy as np
 
 from config import Config
-from benchmarking.output_utils import (
-    save_feature_vulnerability_outputs,
-    save_final_outputs,
-    save_robustness_degradation_figure,
-)
-from benchmarking.poster_figures import plot_vulnerability, poster_style
 from benchmarking import ModelBenchmark
 from benchmarking.run_metadata import BenchmarkRunContext
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_MODULE_PATH = _REPO_ROOT / "tests" / "test_output_utils.py"
+
+
+def _output_utils():
+    return importlib.import_module("benchmarking.output_utils")
+
+
+def _poster_figures():
+    return importlib.import_module("benchmarking.poster_figures")
 
 
 def _make_three_model_benchmark() -> ModelBenchmark:
@@ -142,6 +147,16 @@ class _FinalOutputStubWithScoreboard(_FinalOutputStub):
 
 
 class OutputUtilsTest(unittest.TestCase):
+    def test_module_avoids_top_level_optional_plot_imports(self):
+        tree = ast.parse(_MODULE_PATH.read_text(encoding="utf-8"))
+        top_level = {
+            getattr(node, "module", None)
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertNotIn("benchmarking.output_utils", top_level)
+        self.assertNotIn("benchmarking.poster_figures", top_level)
+
     def test_benchmarking_uses_headless_matplotlib_backend(self):
         import matplotlib
 
@@ -164,6 +179,7 @@ class OutputUtilsTest(unittest.TestCase):
         )
 
     def test_save_final_outputs_propagates_required_export_failures(self):
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory() as tmp:
             config = Config()
             with self.assertRaises(OSError):
@@ -175,6 +191,7 @@ class OutputUtilsTest(unittest.TestCase):
                 )
 
     def test_save_final_outputs_writes_markdown_report(self):
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory() as tmp:
             config = Config()
             output_dir = Path(tmp)
@@ -194,6 +211,7 @@ class OutputUtilsTest(unittest.TestCase):
             import matplotlib  # noqa: F401
         except ImportError:
             self.skipTest("matplotlib not installed")
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             config = Config()
             output_dir = Path(tmp)
@@ -233,6 +251,7 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("confusion_matrix_best_model_raw.png", metadata["artifacts"]["files"])
 
     def test_save_final_outputs_writes_dissertation_scoreboard(self):
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory() as tmp:
             config = Config()
             output_dir = Path(tmp)
@@ -272,6 +291,7 @@ class OutputUtilsTest(unittest.TestCase):
             import matplotlib  # noqa: F401
         except ImportError:
             self.skipTest("matplotlib not installed")
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             config = Config()
             output_dir = Path(tmp)
@@ -305,6 +325,7 @@ class OutputUtilsTest(unittest.TestCase):
             import matplotlib  # noqa: F401
         except ImportError:
             self.skipTest("matplotlib not installed")
+        save_final_outputs = _output_utils().save_final_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             config = Config()
             output_dir = Path(tmp)
@@ -336,6 +357,8 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("Skipping PR curve comparison", out.getvalue())
 
     def test_save_robustness_degradation_figure_no_data_is_no_op(self):
+        save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
+
         class _NoRobustness:
             pass
 
@@ -350,6 +373,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
@@ -369,6 +393,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        save_feature_vulnerability_outputs = _output_utils().save_feature_vulnerability_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
@@ -404,6 +429,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
@@ -425,12 +451,14 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("pandas not installed")
-        from benchmarking.poster_figures import degradation_caption
+        degradation_caption = _poster_figures().degradation_caption
 
         models = ["m_a"]
         scenarios = ("baseline", "cheap_only")
         pr = np.array([[0.7, 0.65]])
         cap = degradation_caption(models, scenarios, pr, [])
+        self.assertIn("top-1 model", cap)
+        self.assertNotIn("top-3 models", cap)
         self.assertTrue("Δ" in cap or "delta" in cap.lower())
 
     def test_vulnerability_figure_writes_pdf_and_caption(self):
@@ -439,6 +467,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        save_feature_vulnerability_outputs = _output_utils().save_feature_vulnerability_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
@@ -465,6 +494,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        save_feature_vulnerability_outputs = _output_utils().save_feature_vulnerability_outputs
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
@@ -489,6 +519,7 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        plot_vulnerability = _poster_figures().plot_vulnerability
         filtered = pd.DataFrame({
             "flip_rate": [0.9, 0.5],
             "cost_tier": ["cheap", "expensive"],
@@ -511,6 +542,8 @@ class OutputUtilsTest(unittest.TestCase):
             import pandas as pd
         except ImportError:
             self.skipTest("matplotlib/pandas not installed")
+        output_utils = _output_utils()
+        poster_style = _poster_figures().poster_style
         before = float(plt.rcParams["font.size"])
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
@@ -519,11 +552,11 @@ class OutputUtilsTest(unittest.TestCase):
                 {"model": "m_a", "scenario": "baseline", "macro_f1": 0.9, "pr_auc": 0.7},
                 {"model": "m_a", "scenario": "cheap_only", "macro_f1": 0.85, "pr_auc": 0.65},
             ])
-            save_robustness_degradation_figure(bench, out)
+            output_utils.save_robustness_degradation_figure(bench, out)
             rows = [{"model": "m_a", "feature": "f0", "attack_name": "a", "cost_tier": "cheap",
                      "flip_rate": 0.5, "confidence_drop_mean": 0.1}]
             bench.feature_attack_results = pd.DataFrame(rows)
-            save_feature_vulnerability_outputs(bench, out, top_n=1)
+            output_utils.save_feature_vulnerability_outputs(bench, out, top_n=1)
         self.assertEqual(float(plt.rcParams["font.size"]), before)
         with poster_style():
             _ = plt.rcParams["font.size"]
