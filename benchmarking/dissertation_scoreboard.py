@@ -125,13 +125,13 @@ def to_latex(df: pd.DataFrame) -> str:
     perf = [d for d, _ in METRIC_COLUMNS]
     masks = {c: _best_mask(df[c]) for c in perf}
     ncols = len(df.columns)
-    spec = "rl" + "r" * (ncols - 2)
+    spec = f"@{{}}{'rl' + 'r' * (ncols - 2)}@{{}}"
     caption_tex = CAPTION.replace("%", r"\%")
     out = [
         "% Requires \\usepackage{booktabs}",
         "% " + caption_tex,
         "",
-        "\\begin{tabular}{@" + spec + "}",
+        f"\\begin{{tabular}}{{{spec}}}",
         "\\toprule",
         " & ".join(str(c).replace("_", r"\_") for c in df.columns) + r"\\",
         "\\midrule",

@@ -92,6 +92,14 @@ class DissertationScoreboardTest(unittest.TestCase):
         tex = to_latex(build_scoreboard(b))
         self.assertIn(r"my\_model", tex)
 
+    def test_latex_uses_valid_wrapped_tabular_spec(self):
+        b = _Bench(
+            {"only": _row(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.1, 0.5, 1.0)}
+        )
+        tex = to_latex(build_scoreboard(b))
+        self.assertIn(r"\begin{tabular}{@{}rlrrrrrrrrr@{}}", tex)
+        self.assertNotIn(r"\begin{tabular}{@rl", tex)
+
     def test_latex_deterministic(self):
         b = _Bench(
             {

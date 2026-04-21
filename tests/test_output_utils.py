@@ -260,8 +260,11 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertTrue((output_dir / "dissertation_scoreboard.md").exists())
             self.assertTrue((output_dir / "dissertation_scoreboard.tex").exists())
             csv_text = (output_dir / "dissertation_scoreboard.csv").read_text(encoding="utf-8")
+            tex_text = (output_dir / "dissertation_scoreboard.tex").read_text(encoding="utf-8")
             self.assertIn("logistic_regression", csv_text)
             self.assertIn("PR-AUC", csv_text)
+            self.assertIn(r"\begin{tabular}{@{}rlrrrrrrrrr@{}}", tex_text)
+            self.assertNotIn(r"\begin{tabular}{@rl", tex_text)
 
     def test_save_final_outputs_writes_pr_and_cm_figures(self):
         try:
