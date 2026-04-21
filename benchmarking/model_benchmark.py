@@ -390,6 +390,8 @@ class ModelBenchmark:
         X_eval = self._align_eval_input(X_eval, result.get("feature_names") or [])
         scaler = result.get("scaler")
         if scaler is None:
+            if isinstance(X_eval, pd.DataFrame) and not isinstance(result.get("X_train"), pd.DataFrame):
+                return X_eval.to_numpy()
             return self._copy_input(X_eval)
         if isinstance(X_eval, pd.DataFrame) and not hasattr(scaler, "feature_names_in_"):
             X_eval = X_eval.to_numpy()
