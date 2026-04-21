@@ -1,0 +1,6 @@
+# Overrides for dissertation/poster SHAP export (use with run_benchmark.py --explain).
+explainability:
+  poster:
+    enabled: true
+    model: xgboost
+    top_n: 10

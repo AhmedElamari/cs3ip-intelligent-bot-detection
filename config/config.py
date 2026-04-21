@@ -126,6 +126,11 @@ class Config:
                 'enabled': True,
                 'methods': ['builtin', 'permutation'],
             },
+            'poster': {
+                'enabled': False,
+                'model': 'xgboost',
+                'top_n': 10,
+            },
         },
 
         'robustness': {
@@ -448,6 +453,10 @@ explainability:
     methods:
       - builtin
       - permutation
+  poster:
+    enabled: false
+    model: xgboost
+    top_n: 10
 
 robustness:
   enabled: false

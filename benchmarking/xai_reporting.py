@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 
 from config import Config
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
+from explainability.poster_shap import export_poster_shap
 
 
 def run_explainability_analysis(
@@ -142,12 +143,25 @@ def run_explainability_analysis(
 
                 xai_results[f'shap_{model_name}'] = shap_importance
 
-                # Save SHAP summary plot
                 if config.get('output.save_plots'):
                     try:
-                        fig = shap_explainer.plot_summary(X_test_m[:min(50, len(X_test_m))], max_display=10)
+                        n_shap = min(50, len(X_test_m))
+                        X_shap = X_test_m[:n_shap]
+                        fig = shap_explainer.plot_summary(X_shap, max_display=10)
                         fig.savefig(output_dir / f'shap_summary_{model_name}.png', dpi=150, bbox_inches='tight')
                         plt.close(fig)
+                        if (
+                            config.get('explainability.poster.enabled', False)
+                            and model_name == config.get('explainability.poster.model', 'xgboost')
+                        ):
+                            export_poster_shap(
+                                shap_explainer.shap_values,
+                                X_shap,
+                                list(feature_names),
+                                model_name=model_name,
+                                output_dir=output_dir / 'poster',
+                                top_n=int(config.get('explainability.poster.top_n', 10)),
+                            )
                     except Exception as e:
                         print(f"Could not save SHAP plot: {e}")
 
