@@ -11,6 +11,12 @@ import pandas as pd
 from pathlib import Path
 
 
+def _importance_value(v: Any) -> float:
+    if isinstance(v, dict):
+        return float(v.get("mean", 0))
+    return float(v)
+
+
 class FeatureImportanceAnalyzer:
     """
     Unified feature importance analyzer for bot detection.
@@ -216,7 +222,7 @@ class FeatureImportanceAnalyzer:
         """
         sorted_features = sorted(
             importance_dict.items(),
-            key=lambda x: x[1] if isinstance(x[1], (int, float)) else x[1].get('mean', 0),
+            key=lambda x: _importance_value(x[1]),
             reverse=not ascending
         )
         return sorted_features[:n]
