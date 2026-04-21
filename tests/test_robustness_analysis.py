@@ -3,6 +3,7 @@ import json
 import sys
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 
 try:
@@ -91,6 +92,14 @@ class RobustnessAnalysisTest(unittest.TestCase):
         replayed_test = benchmark.prepare_eval_inputs('logistic_regression', benchmark.base_test_inputs)
         np.testing.assert_allclose(replayed_test, expected_test)
         self.assertEqual(expected_train.shape[1], replayed_test.shape[1])
+
+    def test_prepare_eval_inputs_returns_numpy_for_unscaled_dataframe_models(self):
+        benchmark, _, feature_names = self._build_benchmark(enabled_models=("random_forest",))
+        frame = pd.DataFrame(benchmark.base_test_inputs, columns=feature_names)
+
+        replayed_test = benchmark.prepare_eval_inputs('random_forest', frame)
+
+        self.assertIsInstance(replayed_test, np.ndarray)
 
     def test_prepare_eval_inputs_aligns_wider_dataframe_to_model_features(self):
         benchmark, _, feature_names = self._build_benchmark(feature_selection=True, n_features=5)
@@ -325,6 +334,22 @@ class RobustnessAnalysisTest(unittest.TestCase):
             results_a['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True).fillna(''),
             results_b['feature_attacks'].sort_values(['model', 'feature']).reset_index(drop=True).fillna(''),
             check_dtype=False,
+        )
+
+    def test_profile_perturbation_avoids_dtype_futurewarning(self):
+        from benchmarking.robustness import RobustnessAnalyzer
+
+        benchmark, config, feature_names = self._build_benchmark()
+        config.set('robustness.enabled', True)
+        analyzer = RobustnessAnalyzer(benchmark, feature_names, config)
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", FutureWarning)
+            analyzer._build_profile_perturbed_full_test('cheap_only')
+
+        self.assertFalse(
+            any(issubclass(w.category, FutureWarning) for w in caught),
+            [str(w.message) for w in caught],
         )
 
 

@@ -154,6 +154,8 @@ class RobustnessAnalyzer:
         mutated = profile_result.data
         for col in mutated.columns:
             if col in X_work.columns:
+                if pd.api.types.is_numeric_dtype(mutated[col]) and not pd.api.types.is_float_dtype(X_work[col]):
+                    X_work[col] = X_work[col].astype(np.float64)
                 X_work.loc[sub.index, col] = mutated.loc[sub.index, col].values
         return X_work
 

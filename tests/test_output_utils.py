@@ -141,6 +141,11 @@ class _FinalOutputStubWithScoreboard(_FinalOutputStub):
 
 
 class OutputUtilsTest(unittest.TestCase):
+    def test_benchmarking_uses_headless_matplotlib_backend(self):
+        import matplotlib
+
+        self.assertEqual("agg", matplotlib.get_backend().lower())
+
     def _build_run_context(self, output_dir: Path) -> BenchmarkRunContext:
         return BenchmarkRunContext(
             argv=["--models", "logistic_regression"],
