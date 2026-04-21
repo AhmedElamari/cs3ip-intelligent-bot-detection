@@ -6,7 +6,7 @@ CLI entry point for multi-model benchmarking with XAI analysis.
 Usage:
     python run_benchmark.py
     python run_benchmark.py --config config/config.yaml
-    python run_benchmark.py --explain --save-plots
+    python run_benchmark.py --explain
 """
 
 import argparse
@@ -22,7 +22,7 @@ from config import Config, load_config
 from benchmarking import ModelBenchmark
 from benchmarking.data_prep import load_data, prepare_data
 from benchmarking.model_factory import create_models
-from benchmarking.output_utils import save_comparison_outputs, save_final_outputs
+from benchmarking.output_utils import save_final_outputs
 from benchmarking.robustness import run_robustness_analysis
 from benchmarking.run_metadata import BenchmarkRunContext
 from benchmarking.xai_reporting import run_explainability_analysis
@@ -65,11 +65,6 @@ def _build_parser() -> argparse.ArgumentParser:
         '--explain',
         action='store_true',
         help='Run explainability analysis'
-    )
-    parser.add_argument(
-        '--save-plots',
-        action='store_true',
-        help='Save visualization plots'
     )
     parser.add_argument(
         '--models',
@@ -117,12 +112,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help='Override robustness profiles (e.g. cheap_only realistic_mixed)'
     )
     parser.add_argument(
-        '--robustness-max-shap-samples',
-        type=int,
-        default=None,
-        help='Override SHAP sample cap for robustness analysis'
-    )
-    parser.add_argument(
         '--no-tune',
         action='store_true',
         help='Skip hyperparameter optimisation; use config params only',
@@ -137,6 +126,22 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help='Override number of Optuna trials per model for this run',
+    )
+    parser.add_argument(
+        '--dissertation-core',
+        action='store_true',
+        help=(
+            'Dissertation-focused full run: tuned HPO + all models (when --models is omitted), '
+            'bootstrap CIs and pairwise tests (unless you pass --skip-statistics), and full '
+            'benchmark artifacts including dissertation_scoreboard.*; skips slow extras '
+            '(performance plots, XAI/SHAP, robustness).'
+        ),
+    )
+    parser.add_argument(
+        '--scoreboard-only',
+        dest='dissertation_core',
+        action='store_true',
+        help=argparse.SUPPRESS,
     )
     return parser
 
@@ -174,19 +179,23 @@ def main():
     else:
         config = Config()
 
+    if args.dissertation_core:
+        args.explain = False
+        args.robustness_analysis = False
+        config.set('output.save_plots', False)
+        config.set('robustness.enabled', False)
+
     if args.smote:
         config.set('preprocessing.handle_imbalance', True)
         config.set('preprocessing.imbalance_method', 'smote')
     if args.scale:
         config.set('preprocessing.scale_features', True)
-    if args.save_plots or args.explain:
+    if args.explain:
         config.set('output.save_plots', True)
     if args.robustness_analysis:
         config.set('robustness.enabled', True)
     if args.robustness_profiles:
         config.set('robustness.profiles', args.robustness_profiles)
-    if args.robustness_max_shap_samples is not None:
-        config.set('robustness.max_shap_samples', args.robustness_max_shap_samples)
     if args.models:
         known_models = set(config.get('models', {}).keys())
         unknown = [m for m in args.models if m not in known_models]
@@ -197,6 +206,9 @@ def main():
             )
         for model_name in known_models:
             config.set(f'models.{model_name}.enabled', model_name in args.models)
+    elif args.dissertation_core:
+        for model_name in config.get('models', {}).keys():
+            config.set(f'models.{model_name}.enabled', True)
 
     enabled_models = config.get_enabled_models()
     scale_from_config = config.get('preprocessing.scale_features')
@@ -219,11 +231,24 @@ def main():
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
     print("="*60)
+    if args.dissertation_core:
+        stats = "off" if args.skip_statistics else "on"
+        print(
+            "Mode: --dissertation-core (HPO + all models; inferential stats "
+            f"{stats}; no XAI / robustness; still writes dissertation PR/CM figures)"
+        )
     print(f"Data:   {data_source_str}")
     print(f"Output: {output_dir}")
     print(f"Models: {config.get_enabled_models()}")
 
     explainability_audit = _resolve_explainability_audit(args, config)
+    if args.dissertation_core:
+        explainability_audit = {
+            'xai_enabled': False,
+            'xai_requested_by_cli': False,
+            'xai_enabled_in_config': bool(config.get('explainability.enabled')),
+            'xai_effective_source': 'dissertation_core',
+        }
     state = "enabled" if explainability_audit['xai_enabled'] else "disabled"
     print(f"Explainability: {state} (source: {explainability_audit['xai_effective_source']})")
 
@@ -292,9 +317,9 @@ def main():
 
     benchmark.print_summary()
 
-    save_comparison_outputs(benchmark, output_dir, config)
+    skip_slow_aux = args.dissertation_core
 
-    if explainability_audit['xai_enabled']:
+    if not skip_slow_aux and explainability_audit['xai_enabled']:
         run_explainability_analysis(
             benchmark,
             feature_names,
@@ -302,7 +327,7 @@ def main():
             output_dir
         )
 
-    if config.get('robustness.enabled'):
+    if not skip_slow_aux and config.get('robustness.enabled'):
         run_robustness_analysis(
             benchmark,
             feature_names,

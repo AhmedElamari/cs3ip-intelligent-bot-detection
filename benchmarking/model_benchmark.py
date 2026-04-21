@@ -10,10 +10,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from .dissertation_scoreboard import SCOREBOARD_METRIC_KEYS as SCOREBOARD_METRICS
+from .dissertation_scoreboard import build_scoreboard
 from .metrics import MetricsCalculator
 from .output_formatting import format_frame_for_export, format_payload_for_export
 from benchmarking.hpo.input_prep import build_model_inputs
-
 
 
 DEFAULT_METRICS = {
@@ -56,6 +57,8 @@ class ModelBenchmark:
         self.base_y_train: Optional[np.ndarray] = None
         self.base_feature_names: List[str] = []
         self.robustness_summary: Optional[pd.DataFrame] = None
+        self.robustness_degradation: Optional[pd.DataFrame] = None
+        self.feature_attack_results: Optional[pd.DataFrame] = None
         self.hpo_audit_by_model: Dict[str, Dict[str, Any]] = {}
 
     def add_model(self, name: str, model: Any) -> "ModelBenchmark":
@@ -343,6 +346,11 @@ class ModelBenchmark:
             rows.append(row)
         return pd.DataFrame(rows)
 
+    def get_scoreboard_table(self, dataset: str = "test") -> pd.DataFrame:
+        from benchmarking.dissertation_scoreboard import build_scoreboard
+
+        return build_scoreboard(self, dataset=dataset)
+
     def get_best_model(self, metric: str = "f1", dataset: str = "test") -> tuple:
         ranked_results = self._ranked_result_items(sort_by=metric, dataset=dataset)
         if not ranked_results:
@@ -382,6 +390,8 @@ class ModelBenchmark:
         X_eval = self._align_eval_input(X_eval, result.get("feature_names") or [])
         scaler = result.get("scaler")
         if scaler is None:
+            if isinstance(X_eval, pd.DataFrame) and not isinstance(result.get("X_train"), pd.DataFrame):
+                return X_eval.to_numpy()
             return self._copy_input(X_eval)
         if isinstance(X_eval, pd.DataFrame) and not hasattr(scaler, "feature_names_in_"):
             X_eval = X_eval.to_numpy()
@@ -448,108 +458,105 @@ class ModelBenchmark:
         if interpretable:
             print(f"\nInterpretable models: {', '.join(interpretable)}")
 
-    def plot_comparison(
-        self,
-        metrics: List[str] = None,
-        figsize: tuple = (12, 6),
-    ):
+    def plot_pr_curves_top(self, top_n: int = 3, figsize: tuple = (8, 6)):
+        """Test-set PR curves for top ``top_n`` models by dissertation scoreboard order (F1-Macro, ROC-AUC)."""
         import matplotlib.pyplot as plt
-
-        if metrics is None:
-            metrics = ["accuracy", "precision", "recall", "f1"]
-
-        df = self.get_comparison_table(metrics=metrics)
-        fig, ax = plt.subplots(figsize=figsize)
-        x_positions = np.arange(len(df))
-        width = 0.8 / max(len(metrics), 1)
-
-        for index, metric in enumerate(metrics):
-            column = metric.upper()
-            if column not in df.columns:
-                continue
-            offset = (index - len(metrics) / 2 + 0.5) * width
-            values = df[column].to_numpy()
-            bars = ax.bar(
-                x_positions + offset,
-                values,
-                width,
-                label=column,
-                alpha=0.8,
-            )
-            for bar, value in zip(bars, values):
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2,
-                    value + 0.01,
-                    f"{value:.3f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=8,
-                )
-
-        ax.set_ylabel("Score")
-        ax.set_title("Model Performance Comparison")
-        ax.set_xticks(x_positions)
-        ax.set_xticklabels(df["Model"], rotation=45, ha="right")
-        ax.legend()
-        ax.set_ylim(0, 1.1)
-        ax.grid(True, alpha=0.3, axis="y")
-
-        plt.tight_layout()
-        return fig
-
-    def plot_training_times(self, figsize: tuple = (10, 5)):
-        import matplotlib.pyplot as plt
-
-        comparison_df = self.get_comparison_table()
-        plot_df = comparison_df.sort_values("Training Time (s)", ascending=False)
-        fig, ax = plt.subplots(figsize=figsize)
-        bars = ax.barh(
-            plot_df["Model"],
-            plot_df["Training Time (s)"],
-            color="steelblue",
-            alpha=0.7,
-        )
-        ax.set_xlabel("Training Time (seconds)")
-        ax.set_title("Model Training Times")
-
-        for bar, value in zip(bars, plot_df["Training Time (s)"]):
-            y_pos = bar.get_y() + bar.get_height() / 2
-            ax.text(value + 0.01, y_pos, f"{value:.2f}s", va="center")
-
-        plt.tight_layout()
-        return fig
-
-    def plot_roc_curves(self, figsize: tuple = (10, 8)):
-        import matplotlib.pyplot as plt
-        from sklearn.metrics import roc_curve
 
         if self.y_test is None:
             raise RuntimeError("y_test not available. Run run_benchmark() first.")
 
-        ranked_names = [
-            name
-            for name, _ in self._ranked_result_items(sort_by="roc_auc", dataset="test")
-            if name in self.probabilities
-        ]
-        fig, ax = plt.subplots(figsize=figsize)
-        colors = plt.cm.Set1(np.linspace(0, 1, max(len(ranked_names), 1)))
-
-        for color, name in zip(colors, ranked_names):
-            proba = self.probabilities.get(name)
-            if proba is None:
+        scoreboard_df = build_scoreboard(self, dataset="test")
+        ranked_with_proba: List[str] = []
+        for _, row in scoreboard_df.iterrows():
+            name = str(row["Model"])
+            if name not in self.probabilities:
                 continue
-            y_proba = proba[:, 1] if len(proba.shape) > 1 else proba
-            auc = self.results[name]["test_metrics"].get("roc_auc", 0.0)
-            fpr, tpr, _ = roc_curve(self.y_test, y_proba)
-            ax.plot(fpr, tpr, color=color, label=f"{name} (AUC={auc:.3f})")
+            ranked_with_proba.append(name)
+            if len(ranked_with_proba) >= top_n:
+                break
 
-        ax.plot([0, 1], [0, 1], "k--", label="Random")
-        ax.set_xlabel("False Positive Rate")
-        ax.set_ylabel("True Positive Rate")
-        ax.set_title("ROC Curves Comparison")
-        ax.legend(loc="lower right")
+        if len(ranked_with_proba) < top_n:
+            print(
+                f"Warning: Skipping PR curve comparison: need {top_n} models with "
+                f"test-set probabilities, found {len(ranked_with_proba)}."
+            )
+            return None
+
+        fig, ax = plt.subplots(figsize=figsize)
+        colors = plt.cm.Set1(np.linspace(0, 1, max(top_n, 1)))
+
+        for color, name in zip(colors, ranked_with_proba):
+            pr_data = self.metrics_calculator.get_precision_recall_curve(
+                self.y_test, self.probabilities[name]
+            )
+            pr_auc = float(self.results[name]["test_metrics"].get("pr_auc", 0.0))
+            ax.plot(
+                pr_data["recall"],
+                pr_data["precision"],
+                color=color,
+                label=f"{name} (PR-AUC = {pr_auc:.3f})",
+            )
+
+        prevalence = float(np.mean(np.asarray(self.y_test, dtype=float)))
+        ax.axhline(
+            y=prevalence,
+            linestyle="--",
+            color="grey",
+            label="Class prevalence",
+        )
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+        ax.set_title("Precision-Recall Curves Comparison (test set)")
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        ax.legend(loc="lower left")
         ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        return fig
 
+    def plot_best_confusion_matrix(
+        self,
+        normalize: Optional[str] = "true",
+        figsize: tuple = (5.5, 4.5),
+    ):
+        """Confusion matrix for best model by scoreboard (F1-Macro); test predictions only."""
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+
+        if self.y_test is None:
+            raise RuntimeError("y_test not available. Run run_benchmark() first.")
+
+        scoreboard_df = build_scoreboard(self, dataset="test")
+        if scoreboard_df.empty:
+            raise ValueError("No benchmark results for confusion matrix.")
+
+        best_name = str(scoreboard_df.iloc[0]["Model"])
+        if best_name not in self.predictions:
+            raise KeyError(f"No test predictions stored for best model {best_name!r}.")
+
+        y_pred = self.predictions[best_name]
+        cm = self.metrics_calculator.get_confusion_matrix(
+            self.y_test, y_pred, normalize=normalize
+        )
+        fmt = ".2f" if normalize else "d"
+        title_kind = (
+            "Normalized by True Label" if normalize == "true" else "Raw Counts"
+        )
+
+        fig, ax = plt.subplots(figsize=figsize)
+        sns.heatmap(
+            cm,
+            annot=True,
+            fmt=fmt,
+            cmap="Blues",
+            ax=ax,
+            cbar=True,
+            xticklabels=["Human", "Bot"],
+            yticklabels=["Human", "Bot"],
+        )
+        ax.set_xlabel("Predicted label")
+        ax.set_ylabel("True label")
+        ax.set_title(f"Confusion Matrix ({title_kind}) — {best_name}")
         plt.tight_layout()
         return fig
 
@@ -563,10 +570,6 @@ class ModelBenchmark:
         raw_fi_df = self._export_dataframe(self.get_feature_importance_raw())
         if not raw_fi_df.empty:
             raw_fi_df.to_csv(path / "feature_importance.csv")
-
-        normalized_fi_df = self._export_dataframe(self.get_feature_importance_comparison())
-        if not normalized_fi_df.empty:
-            normalized_fi_df.to_csv(path / "feature_importance_comparison.csv")
 
         ci_df = self._export_dataframe(self.get_confidence_intervals())
         if not ci_df.empty:

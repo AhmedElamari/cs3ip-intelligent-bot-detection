@@ -85,9 +85,17 @@ class BenchmarkSmokeTest(unittest.TestCase):
         except ImportError:
             self.skipTest("matplotlib not installed")
 
-        fig = benchmark.plot_roc_curves()
-        self.assertIsNotNone(fig)
-        plt.close(fig)
+        fig_pr = benchmark.plot_pr_curves_top(top_n=1)
+        self.assertIsNotNone(fig_pr)
+        plt.close(fig_pr)
+
+        fig_cm_norm = benchmark.plot_best_confusion_matrix(normalize="true")
+        self.assertIsNotNone(fig_cm_norm)
+        plt.close(fig_cm_norm)
+
+        fig_cm_raw = benchmark.plot_best_confusion_matrix(normalize=None)
+        self.assertIsNotNone(fig_cm_raw)
+        plt.close(fig_cm_raw)
 
 
 class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
@@ -578,6 +586,10 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
         from benchmarking.data_prep import prepare_data
         from benchmarking.model_factory import create_models
         from benchmarking import ModelBenchmark
+        from benchmarking.output_utils import (
+            save_feature_vulnerability_outputs,
+            save_robustness_degradation_figure,
+        )
         from benchmarking.robustness import run_robustness_analysis
         from config import Config
 
@@ -587,7 +599,6 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
             config.set(f'models.{name}.enabled', name == 'logistic_regression')
         config.set('preprocessing.scale_features', True)
         config.set('robustness.enabled', True)
-        config.set('robustness.max_shap_samples', 5)
 
         X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
         models = create_models(config)
@@ -604,6 +615,17 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
             self.assertIn('summary', results)
             self.assertTrue((out / 'robustness_summary.csv').exists())
             self.assertTrue((out / 'feature_attack_results.csv').exists())
+            self.assertTrue((out / 'robustness_degradation.csv').exists())
+            try:
+                import matplotlib  # noqa: F401
+            except ImportError:
+                pass
+            else:
+                save_robustness_degradation_figure(benchmark, out)
+                save_feature_vulnerability_outputs(benchmark, out)
+                self.assertTrue((out / 'robustness_profile_degradation.png').exists())
+                self.assertTrue((out / 'top_feature_vulnerabilities.csv').exists())
+                self.assertTrue((out / 'feature_attack_flip_rates_best_model.png').exists())
 
 
 if __name__ == '__main__':
