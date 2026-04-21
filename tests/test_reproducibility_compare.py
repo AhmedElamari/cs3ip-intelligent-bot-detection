@@ -126,8 +126,8 @@ class ReproducibilityCompareTest(unittest.TestCase):
 
     def test_compare_runs_ignores_plot_files(self):
         run_a, run_b = self._build_run_pair(f1_a=0.9123, f1_b=0.9123)
-        (run_a / "performance_comparison.png").write_bytes(b"plot-a")
-        (run_b / "performance_comparison.png").write_bytes(b"plot-b")
+        (run_a / "pr_curves_comparison.png").write_bytes(b"plot-a")
+        (run_b / "pr_curves_comparison.png").write_bytes(b"plot-b")
         matches, differences = REPRO_COMPARE.compare_runs(run_a, run_b)
 
         self.assertTrue(matches)

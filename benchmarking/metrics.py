@@ -6,7 +6,7 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, average_precision_score, matthews_corrcoef,
     cohen_kappa_score, balanced_accuracy_score, log_loss,
-    confusion_matrix, classification_report, roc_curve, precision_recall_curve
+    confusion_matrix, classification_report, precision_recall_curve
 )
 
 
@@ -17,7 +17,9 @@ class MetricsCalculator:
         'accuracy': 'Overall correctness of predictions',
         'precision': 'Proportion of predicted bots that are actual bots',
         'recall': 'Proportion of actual bots correctly identified (sensitivity)',
-        'f1': 'Harmonic mean of precision and recall',
+        'f1': 'Harmonic mean of precision and recall (binary positive class)',
+        'f1_macro': 'Unweighted mean of per-class F1 scores',
+        'f1_weighted': 'Support-weighted mean of per-class F1 scores',
         'specificity': 'Proportion of actual humans correctly identified',
         'balanced_accuracy': 'Average of recall for each class',
         'roc_auc': 'Area under ROC curve (ranking quality)',
@@ -64,6 +66,8 @@ class MetricsCalculator:
         metrics['precision'] = precision_score(y_true, y_pred, average='binary', zero_division=0)
         metrics['recall'] = recall_score(y_true, y_pred, average='binary', zero_division=0)
         metrics['f1'] = f1_score(y_true, y_pred, average='binary', zero_division=0)
+        metrics['f1_macro'] = f1_score(y_true, y_pred, average='macro', zero_division=0)
+        metrics['f1_weighted'] = f1_score(y_true, y_pred, average='weighted', zero_division=0)
         
         # Confusion matrix derived
         tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
@@ -139,7 +143,7 @@ class MetricsCalculator:
         Returns:
             Confusion matrix array
         """
-        return confusion_matrix(y_true, y_pred, normalize=normalize)
+        return confusion_matrix(y_true, y_pred, labels=[0, 1], normalize=normalize)
     
     def get_classification_report(
         self,
@@ -165,29 +169,6 @@ class MetricsCalculator:
             zero_division=0
         )
     
-    def get_roc_curve(
-        self,
-        y_true: np.ndarray,
-        y_proba: np.ndarray
-    ) -> Dict[str, np.ndarray]:
-        """
-        Get ROC curve data.
-        
-        Args:
-            y_true: True labels
-            y_proba: Probability predictions
-            
-        Returns:
-            Dictionary with fpr, tpr, thresholds
-        """
-        proba = self._positive_class_proba(y_proba)
-        fpr, tpr, thresholds = roc_curve(y_true, proba)
-        return {
-            'fpr': fpr,
-            'tpr': tpr,
-            'thresholds': thresholds,
-        }
-    
     def get_precision_recall_curve(
         self,
         y_true: np.ndarray,
@@ -210,159 +191,6 @@ class MetricsCalculator:
             'recall': recall,
             'thresholds': thresholds,
         }
-    
-    def find_optimal_threshold(
-        self,
-        y_true: np.ndarray,
-        y_proba: np.ndarray,
-        metric: str = 'f1'
-    ) -> Dict[str, float]:
-        """
-        Find optimal classification threshold.
-        
-        Args:
-            y_true: True labels
-            y_proba: Probability predictions
-            metric: Metric to optimize ('f1', 'balanced_accuracy', 'youden')
-            
-        Returns:
-            Dictionary with optimal threshold and metric value
-        """
-        proba = self._positive_class_proba(y_proba)
-        
-        best_threshold = 0.5
-        best_score = 0
-        
-        for threshold in np.arange(0.1, 0.9, 0.01):
-            y_pred = (proba >= threshold).astype(int)
-            
-            if metric == 'f1':
-                score = f1_score(y_true, y_pred, zero_division=0)
-            elif metric == 'balanced_accuracy':
-                score = balanced_accuracy_score(y_true, y_pred)
-            elif metric == 'youden':
-                # Youden's J statistic = sensitivity + specificity - 1
-                tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-                sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
-                specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
-                score = sensitivity + specificity - 1
-            else:
-                raise ValueError(f"Unknown metric: {metric}")
-            
-            if score > best_score:
-                best_score = score
-                best_threshold = threshold
-        
-        return {
-            'optimal_threshold': best_threshold,
-            'best_score': best_score,
-            'metric': metric,
-        }
-    
-    def plot_confusion_matrix(
-        self,
-        y_true: np.ndarray,
-        y_pred: np.ndarray,
-        normalize: bool = False,
-        figsize: tuple = (8, 6)
-    ):
-        """
-        Plot confusion matrix heatmap.
-        
-        Args:
-            y_true: True labels
-            y_pred: Predicted labels
-            normalize: Whether to normalize
-            figsize: Figure size
-            
-        Returns:
-            matplotlib figure
-        """
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        
-        cm = self.get_confusion_matrix(y_true, y_pred, normalize='true' if normalize else None)
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        sns.heatmap(
-            cm, annot=True, fmt='.2f' if normalize else 'd',
-            cmap='Blues', ax=ax,
-            xticklabels=self.class_names,
-            yticklabels=self.class_names
-        )
-        ax.set_xlabel('Predicted')
-        ax.set_ylabel('Actual')
-        ax.set_title('Confusion Matrix' + (' (Normalized)' if normalize else ''))
-        
-        plt.tight_layout()
-        return fig
-    
-    def plot_roc_curve(
-        self,
-        y_true: np.ndarray,
-        y_proba: np.ndarray,
-        figsize: tuple = (8, 6)
-    ):
-        """
-        Plot ROC curve.
-        
-        Args:
-            y_true: True labels
-            y_proba: Probability predictions
-            figsize: Figure size
-            
-        Returns:
-            matplotlib figure
-        """
-        import matplotlib.pyplot as plt
-        
-        roc_data = self.get_roc_curve(y_true, y_proba)
-        auc = roc_auc_score(y_true, self._positive_class_proba(y_proba))
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.plot(roc_data['fpr'], roc_data['tpr'], 'b-', label=f'ROC (AUC = {auc:.3f})')
-        ax.plot([0, 1], [0, 1], 'k--', label='Random')
-        ax.set_xlabel('False Positive Rate')
-        ax.set_ylabel('True Positive Rate')
-        ax.set_title('ROC Curve')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        return fig
-    
-    def plot_precision_recall_curve(
-        self,
-        y_true: np.ndarray,
-        y_proba: np.ndarray,
-        figsize: tuple = (8, 6)
-    ):
-        """
-        Plot Precision-Recall curve.
-        
-        Args:
-            y_true: True labels
-            y_proba: Probability predictions
-            figsize: Figure size
-            
-        Returns:
-            matplotlib figure
-        """
-        import matplotlib.pyplot as plt
-        
-        pr_data = self.get_precision_recall_curve(y_true, y_proba)
-        auc = average_precision_score(y_true, self._positive_class_proba(y_proba))
-        
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.plot(pr_data['recall'], pr_data['precision'], 'b-', label=f'PR (AUC = {auc:.3f})')
-        ax.set_xlabel('Recall')
-        ax.set_ylabel('Precision')
-        ax.set_title('Precision-Recall Curve')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        return fig
     
     @staticmethod
     def format_metrics(metrics: Dict[str, float], precision: int = 4) -> str:
@@ -401,6 +229,8 @@ class MetricsCalculator:
             'precision': lambda yt, yp: precision_score(yt, yp, average='binary', zero_division=0),
             'recall': lambda yt, yp: recall_score(yt, yp, average='binary', zero_division=0),
             'f1': lambda yt, yp: f1_score(yt, yp, average='binary', zero_division=0),
+            'f1_macro': lambda yt, yp: f1_score(yt, yp, average='macro', zero_division=0),
+            'f1_weighted': lambda yt, yp: f1_score(yt, yp, average='weighted', zero_division=0),
             'balanced_accuracy': balanced_accuracy_score,
             'mcc': matthews_corrcoef,
         }

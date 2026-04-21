@@ -120,16 +120,17 @@ class ResultsRepresentationContractTest(unittest.TestCase):
         positions = [report.index(f"### {model_name}") for model_name in comparison_models]
         self.assertEqual(sorted(positions), positions)
 
-    def test_feature_importance_exports_split_raw_and_normalized_contracts(self):
+    def test_feature_importance_exports_raw_and_in_memory_normalized_contract(self):
         benchmark = self._build_benchmark()
 
         with TemporaryDirectory(dir=ROOT) as tmp_dir:
             output_dir = Path(tmp_dir)
             benchmark.save_results(output_dir)
             raw_df = pd.read_csv(output_dir / "feature_importance.csv")
-            comparison_df = pd.read_csv(output_dir / "feature_importance_comparison.csv")
+            self.assertFalse((output_dir / "feature_importance_comparison.csv").exists())
 
         self.assertNotIn("Average", raw_df.columns)
+        comparison_df = benchmark.get_feature_importance_comparison()
         self.assertIn("Average_Normalized", comparison_df.columns)
         normalized_columns = [
             column
