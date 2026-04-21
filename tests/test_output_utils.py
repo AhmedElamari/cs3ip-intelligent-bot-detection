@@ -16,6 +16,7 @@ from benchmarking.output_utils import (
     save_final_outputs,
     save_robustness_degradation_figure,
 )
+from benchmarking.poster_figures import plot_vulnerability, poster_style
 from benchmarking import ModelBenchmark
 from benchmarking.run_metadata import BenchmarkRunContext
 
@@ -396,6 +397,137 @@ class OutputUtilsTest(unittest.TestCase):
             png = out / "feature_attack_flip_rates_best_model.png"
             self.assertTrue(png.exists())
             self.assertGreater(png.stat().st_size, 100)
+
+    def test_degradation_figure_writes_pdf_and_caption(self):
+        try:
+            import matplotlib  # noqa: F401
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            bench = _make_three_model_benchmark()
+            rows = []
+            for m in ("m_a", "m_b", "m_c"):
+                for s, f1 in (("baseline", 0.9), ("cheap_only", 0.85), ("realistic_mixed", 0.8)):
+                    rows.append({"model": m, "scenario": s, "macro_f1": f1, "pr_auc": 0.7})
+            bench.robustness_degradation = pd.DataFrame(rows)
+            save_robustness_degradation_figure(bench, out)
+            self.assertTrue((out / "robustness_profile_degradation.pdf").exists())
+            cap = out / "robustness_profile_degradation_caption.md"
+            self.assertTrue(cap.exists())
+            text = cap.read_text(encoding="utf-8")
+            self.assertIn("PR-AUC", text)
+            self.assertIn("Macro-F1", text)
+
+    def test_degradation_caption_mentions_delta(self):
+        try:
+            import pandas as pd
+        except ImportError:
+            self.skipTest("pandas not installed")
+        from benchmarking.poster_figures import degradation_caption
+
+        models = ["m_a"]
+        scenarios = ("baseline", "cheap_only")
+        pr = np.array([[0.7, 0.65]])
+        cap = degradation_caption(models, scenarios, pr, [])
+        self.assertTrue("Δ" in cap or "delta" in cap.lower())
+
+    def test_vulnerability_figure_writes_pdf_and_caption(self):
+        try:
+            import matplotlib  # noqa: F401
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            bench = _make_three_model_benchmark()
+            rows = []
+            for i in range(10):
+                rows.append({
+                    "model": "m_a",
+                    "feature": f"f{i}",
+                    "attack_name": "atk",
+                    "cost_tier": "cheap" if i % 2 == 0 else "expensive",
+                    "flip_rate": 1.0 - i * 0.01,
+                    "confidence_drop_mean": 0.05,
+                })
+            bench.feature_attack_results = pd.DataFrame(rows)
+            save_feature_vulnerability_outputs(bench, out, top_n=8)
+            self.assertTrue((out / "feature_attack_flip_rates_best_model.pdf").exists())
+            cap = out / "feature_attack_flip_rates_best_model_caption.md"
+            self.assertTrue(cap.exists())
+            self.assertIn("attack surface", cap.read_text(encoding="utf-8").lower())
+
+    def test_vulnerability_defaults_to_top8(self):
+        try:
+            import matplotlib  # noqa: F401
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            bench = _make_three_model_benchmark()
+            rows = []
+            for i in range(15):
+                rows.append({
+                    "model": "m_a",
+                    "feature": f"f{i}",
+                    "attack_name": "atk",
+                    "cost_tier": "cheap",
+                    "flip_rate": 1.0 - i * 0.01,
+                    "confidence_drop_mean": 0.05,
+                })
+            bench.feature_attack_results = pd.DataFrame(rows)
+            save_feature_vulnerability_outputs(bench, out)
+            df = pd.read_csv(out / "top_feature_vulnerabilities.csv")
+            self.assertEqual(len(df), 8)
+
+    def test_vulnerability_cost_tier_legend(self):
+        try:
+            import matplotlib.pyplot as plt
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        filtered = pd.DataFrame({
+            "flip_rate": [0.9, 0.5],
+            "cost_tier": ["cheap", "expensive"],
+            "display_feature": ["FeatA", "FeatB"],
+        })
+        fig = plot_vulnerability(filtered, "solo_model")
+        ax = fig.axes[0]
+        leg = ax.get_legend()
+        self.assertIsNotNone(leg)
+        labels = [t.get_text() for t in leg.get_texts()]
+        self.assertEqual(len(labels), 2)
+        joined = " ".join(labels)
+        self.assertIn("Cheap", joined)
+        self.assertIn("Expensive", joined)
+        plt.close(fig)
+
+    def test_poster_style_does_not_leak_rcparams(self):
+        try:
+            import matplotlib.pyplot as plt
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        before = float(plt.rcParams["font.size"])
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            bench = _make_three_model_benchmark()
+            bench.robustness_degradation = pd.DataFrame([
+                {"model": "m_a", "scenario": "baseline", "macro_f1": 0.9, "pr_auc": 0.7},
+                {"model": "m_a", "scenario": "cheap_only", "macro_f1": 0.85, "pr_auc": 0.65},
+            ])
+            save_robustness_degradation_figure(bench, out)
+            rows = [{"model": "m_a", "feature": "f0", "attack_name": "a", "cost_tier": "cheap",
+                     "flip_rate": 0.5, "confidence_drop_mean": 0.1}]
+            bench.feature_attack_results = pd.DataFrame(rows)
+            save_feature_vulnerability_outputs(bench, out, top_n=1)
+        self.assertEqual(float(plt.rcParams["font.size"]), before)
+        with poster_style():
+            _ = plt.rcParams["font.size"]
+        self.assertEqual(float(plt.rcParams["font.size"]), before)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,21 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 
 from config import Config
 from .model_benchmark import ModelBenchmark
 from benchmarking.dissertation_scoreboard import build_scoreboard, to_latex, to_markdown
+from benchmarking.poster_figures import (
+    degradation_caption,
+    degradation_matrix,
+    plot_degradation,
+    plot_vulnerability,
+    poster_style,
+    save_poster_figure,
+    vulnerability_caption,
+    vulnerability_frame,
+    write_caption,
+)
 from benchmarking.run_metadata import BenchmarkRunContext, write_run_metadata
 
 
@@ -39,83 +49,46 @@ def save_dissertation_figures(benchmark: ModelBenchmark, output_dir: Path) -> No
 
 
 def save_robustness_degradation_figure(benchmark: ModelBenchmark, output_dir: Path) -> None:
-    """Grouped bar chart: Macro-F1 per scenario for top-3 scoreboard models."""
+    """Poster Macro-F1 grouped bars (top-3 models); PNG+PDF+caption."""
     df = getattr(benchmark, "robustness_degradation", None)
     if df is None or df.empty:
         return
-
     scoreboard = build_scoreboard(benchmark)
     if scoreboard.empty:
         return
-
-    top_models = scoreboard["Model"].head(3).tolist()
-    plot_df = df[df["model"].isin(top_models)].copy()
-    if plot_df.empty:
+    top = scoreboard["Model"].head(3).tolist()
+    want = ("baseline", "cheap_only", "realistic_mixed")
+    scenarios = [s for s in want if s in set(df["scenario"].astype(str))]
+    models, f1, pr = degradation_matrix(df, top, scenarios)
+    if not models or "baseline" not in scenarios:
         return
-
-    scenario_set = set(plot_df["scenario"].astype(str))
-    scenarios = ["baseline"] + [p for p in ("cheap_only", "realistic_mixed") if p in scenario_set]
-    models = [m for m in top_models if m in plot_df["model"].values]
-    if not models:
-        return
-
-    n_scen = len(scenarios)
-    fig_w = max(8.0, 2.0 * len(models))
-    fig, ax = plt.subplots(figsize=(fig_w, 5))
-    x = np.arange(len(models))
-    width = 0.8 / max(n_scen, 1)
-    colors = plt.cm.Set1(np.linspace(0, 1, max(n_scen, 1)))
-
-    for si, scen in enumerate(scenarios):
-        offset = (si - n_scen / 2 + 0.5) * width
-        vals = []
-        for model in models:
-            sub = plot_df[(plot_df["model"] == model) & (plot_df["scenario"] == scen)]
-            vals.append(float(sub["macro_f1"].iloc[0]) if len(sub) else float("nan"))
-        ax.bar(
-            x + offset,
-            vals,
-            width,
-            label=scen.replace("_", " "),
-            color=colors[si % len(colors)],
-            alpha=0.85,
-        )
-
-    ax.set_ylabel("Macro-F1 (test set)")
-    ax.set_title("Robustness: Macro-F1 under adversarial profiles (bots perturbed)")
-    ax.set_xticks(x)
-    ax.set_xticklabels(models, rotation=15, ha="right")
-    ax.set_ylim(0, 1.05)
-    ax.legend(loc="lower right")
-    ax.grid(True, alpha=0.3, axis="y")
-    plt.tight_layout()
-    _save_plot(fig, output_dir / "robustness_profile_degradation.png")
+    with poster_style():
+        fig = plot_degradation(models, scenarios, f1)
+        save_poster_figure(fig, output_dir, "robustness_profile_degradation")
+    write_caption(
+        output_dir,
+        "robustness_profile_degradation",
+        degradation_caption(models, scenarios, pr, getattr(benchmark, "pairwise_significance", [])),
+    )
 
 
 def save_feature_vulnerability_outputs(
     benchmark: ModelBenchmark,
     output_dir: Path,
-    top_n: int = 10,
+    top_n: int = 8,
 ) -> None:
-    """Top single-feature attack flip rates for best scoreboard model: CSV + horizontal bar chart."""
+    """Top single-feature flip rates for best model: CSV + poster PNG/PDF/caption."""
     df = getattr(benchmark, "feature_attack_results", None)
     if df is None or df.empty:
         return
-
     scoreboard = build_scoreboard(benchmark)
     if scoreboard.empty:
         return
-
     best_model = str(scoreboard.iloc[0]["Model"])
-    filtered = (
-        df[(df["model"] == best_model) & df["flip_rate"].notna()]
-        .sort_values("flip_rate", ascending=False)
-        .head(top_n)
-    )
+    filtered = vulnerability_frame(df, best_model, top_n)
     if filtered.empty:
         return
-
-    out_csv = filtered[
+    filtered[
         ["feature", "attack_name", "cost_tier", "flip_rate", "confidence_drop_mean"]
     ].rename(
         columns={
@@ -125,21 +98,15 @@ def save_feature_vulnerability_outputs(
             "flip_rate": "Flip Rate",
             "confidence_drop_mean": "Confidence Drop Mean",
         }
+    ).to_csv(output_dir / "top_feature_vulnerabilities.csv", index=False)
+    with poster_style():
+        fig = plot_vulnerability(filtered, best_model)
+        save_poster_figure(fig, output_dir, "feature_attack_flip_rates_best_model")
+    write_caption(
+        output_dir,
+        "feature_attack_flip_rates_best_model",
+        vulnerability_caption(filtered, best_model),
     )
-    out_csv.to_csv(output_dir / "top_feature_vulnerabilities.csv", index=False)
-
-    fig_h = max(4.0, 0.45 * len(filtered))
-    fig, ax = plt.subplots(figsize=(7, fig_h))
-    y_pos = np.arange(len(filtered))
-    ax.barh(y_pos, filtered["flip_rate"].to_numpy(), color="steelblue", alpha=0.85)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(filtered["feature"].astype(str).tolist())
-    ax.invert_yaxis()
-    ax.set_xlabel("Flip rate (true bots predicted bot → human)")
-    ax.set_title(f"Single-feature attack vulnerability — {best_model}")
-    ax.grid(True, alpha=0.3, axis="x")
-    plt.tight_layout()
-    _save_plot(fig, output_dir / "feature_attack_flip_rates_best_model.png")
 
 
 def save_final_outputs(
