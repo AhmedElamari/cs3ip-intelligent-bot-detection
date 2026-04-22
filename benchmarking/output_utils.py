@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from config import Config
 from .model_benchmark import ModelBenchmark
@@ -13,6 +14,7 @@ from benchmarking.poster_figures import (
     plot_vulnerability,
     poster_style,
     save_poster_figure,
+    targeted_recall_matrix,
     vulnerability_caption,
     vulnerability_frame,
     write_caption,
@@ -49,10 +51,11 @@ def save_dissertation_figures(benchmark: ModelBenchmark, output_dir: Path) -> No
 
 
 def save_robustness_degradation_figure(benchmark: ModelBenchmark, output_dir: Path) -> None:
-    """Poster Macro-F1 grouped bars (top-3 models); PNG+PDF+caption."""
+    """Poster robustness figure with attack-targeted recall plus full-test Macro-F1 context."""
     df = getattr(benchmark, "robustness_degradation", None)
     if df is None or df.empty:
         return
+    summary = getattr(benchmark, "robustness_summary", None)
     scoreboard = build_scoreboard(benchmark)
     if scoreboard.empty:
         return
@@ -62,13 +65,15 @@ def save_robustness_degradation_figure(benchmark: ModelBenchmark, output_dir: Pa
     models, f1, pr = degradation_matrix(df, top, scenarios)
     if not models or "baseline" not in scenarios:
         return
+    recall_models, attacked_recall = targeted_recall_matrix(summary, models, scenarios) if summary is not None else ([], np.array([]))
+    attacked_recall = attacked_recall if recall_models == models and attacked_recall.size > 0 else None
     with poster_style():
-        fig = plot_degradation(models, scenarios, f1)
+        fig = plot_degradation(models, scenarios, f1, attacked_recall)
         save_poster_figure(fig, output_dir, "robustness_profile_degradation")
     write_caption(
         output_dir,
         "robustness_profile_degradation",
-        degradation_caption(models, scenarios, pr, getattr(benchmark, "pairwise_significance", [])),
+        degradation_caption(models, scenarios, f1, pr, getattr(benchmark, "pairwise_significance", []), attacked_recall),
     )
 
 

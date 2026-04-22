@@ -22,6 +22,20 @@ DEFAULT_METRICS = {
     "statistics": ["f1", "roc_auc", "pr_auc", "mcc", "balanced_accuracy"],
 }
 
+MODEL_DISPLAY_NAMES = {
+    "xgboost": "XGBoost",
+    "random_forest": "Random Forest",
+    "logistic_regression": "Logistic Regression",
+    "decision_tree": "Decision Tree",
+    "naive_bayes": "Naive Bayes",
+    "svm": "SVM",
+    "tabnet": "TabNet",
+}
+
+
+def _display_model_name(name: str) -> str:
+    return MODEL_DISPLAY_NAMES.get(str(name), str(name).replace("_", " ").title())
+
 @dataclass
 class ModelBenchmarkConfig:
     metrics: Dict[str, List[str]] = field(default_factory=lambda: DEFAULT_METRICS)
@@ -538,10 +552,19 @@ class ModelBenchmark:
         cm = self.metrics_calculator.get_confusion_matrix(
             self.y_test, y_pred, normalize=normalize
         )
+        display_name = _display_model_name(best_name)
         fmt = ".2f" if normalize else "d"
-        title_kind = (
-            "Normalized by True Label" if normalize == "true" else "Raw Counts"
-        )
+        if normalize == "true":
+            human_recall = float(cm[0, 0])
+            bot_recall = float(cm[1, 1])
+            if bot_recall >= 0.95 and human_recall < 0.75:
+                title = f"{display_name} catches nearly all bots but over-flags some humans"
+            elif min(human_recall, bot_recall) >= 0.8:
+                title = f"{display_name} separates humans and bots cleanly on the test split"
+            else:
+                title = f"{display_name} shows uneven error trade-offs across the two classes"
+        else:
+            title = f"Test-set prediction counts for {display_name}"
 
         fig, ax = plt.subplots(figsize=figsize)
         sns.heatmap(
@@ -556,7 +579,7 @@ class ModelBenchmark:
         )
         ax.set_xlabel("Predicted label")
         ax.set_ylabel("True label")
-        ax.set_title(f"Confusion Matrix ({title_kind}) — {best_name}")
+        ax.set_title(title)
         plt.tight_layout()
         return fig
 

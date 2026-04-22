@@ -35,7 +35,7 @@ PALETTE = {
 SCENARIO_LABELS = {
     "baseline": "Baseline (clean)",
     "cheap_only": "Cheap attacks",
-    "realistic_mixed": "Realistic mixed",
+    "realistic_mixed": "Mixed realistic attacks",
 }
 MODEL_LABELS = {
     "xgboost": "XGBoost",
@@ -88,14 +88,98 @@ def degradation_matrix(df: pd.DataFrame, top_models: Sequence[str], scenarios: S
     return list(models), f1_p.reindex(models, columns=cols).to_numpy(float), pr_p.reindex(models, columns=cols).to_numpy(float)
 
 
-def plot_degradation(models: Sequence[str], scenarios: Sequence[str], f1: np.ndarray) -> mpl.figure.Figure:
+def targeted_recall_matrix(df: pd.DataFrame, top_models: Sequence[str], scenarios: Sequence[str]):
+    plot_df = df[df["model"].isin(top_models)]
+    if plot_df.empty or "baseline" not in scenarios:
+        return [], np.array([])
+    if "attacked_bot_recall_baseline" not in plot_df.columns or "attacked_bot_recall" not in plot_df.columns:
+        return [], np.array([])
+    baseline = plot_df.groupby("model")["attacked_bot_recall_baseline"].first()
+    attacked = plot_df.pivot_table(index="model", columns="profile", values="attacked_bot_recall", aggfunc="first")
+    models = [m for m in top_models if m in baseline.index and pd.notna(baseline.loc[m])]
+    if not models:
+        return [], np.array([])
+    cols = []
+    for scenario in scenarios:
+        if scenario == "baseline":
+            cols.append(baseline.reindex(models).to_numpy(float))
+        else:
+            if scenario not in attacked.columns:
+                cols.append(np.full(len(models), np.nan))
+            else:
+                cols.append(attacked.reindex(models)[scenario].to_numpy(float))
+    return list(models), np.column_stack(cols)
+
+
+def _attack_deltas(f1: np.ndarray, scenarios: Sequence[str]) -> np.ndarray:
+    if f1.size == 0 or "baseline" not in scenarios:
+        return np.array([])
+    bi = scenarios.index("baseline")
+    attack_indices = [idx for idx, scenario in enumerate(scenarios) if idx != bi]
+    if not attack_indices:
+        return np.array([])
+    baseline = f1[:, [bi]]
+    return f1[:, attack_indices] - baseline
+
+
+def _degradation_description(
+    f1: np.ndarray,
+    scenarios: Sequence[str],
+    tolerance: float = 0.01,
+) -> tuple[str, str]:
+    deltas = _attack_deltas(f1, scenarios)
+    if deltas.size == 0:
+        return (
+            "Macro-F1 under the tested adversarial profiles",
+            "No attack scenarios were available beyond the clean baseline.",
+        )
+    min_delta = float(np.nanmin(deltas))
+    max_delta = float(np.nanmax(deltas))
+    if min_delta >= -tolerance and max_delta <= tolerance:
+        return (
+            "Macro-F1 remains stable under the tested adversarial profiles",
+            f"Across the tested perturbations, Macro-F1 stays within +/-{tolerance:.2f} "
+            "of each model's clean baseline.",
+        )
+    if max_delta <= tolerance and min_delta < -tolerance:
+        if min_delta >= -0.05:
+            return (
+                "Macro-F1 is slightly lower under the tested adversarial profiles",
+                "Across the tested perturbations, Macro-F1 is slightly lower than the clean baseline.",
+            )
+        return (
+            "Macro-F1 declines under the tested adversarial profiles",
+            "Across the tested perturbations, Macro-F1 is consistently lower than the clean baseline.",
+        )
+    if min_delta >= -tolerance and max_delta > tolerance:
+        return (
+            "Macro-F1 is flat to slightly higher under the tested adversarial profiles",
+            "Across the tested perturbations, Macro-F1 is flat to slightly higher than the clean baseline.",
+        )
+    return (
+        "Macro-F1 changes modestly under the tested adversarial profiles",
+        "Across the tested perturbations, Macro-F1 varies by scenario but does not move in one direction.",
+    )
+
+
+def _plot_grouped_metric(
+    ax: mpl.axes.Axes,
+    models: Sequence[str],
+    scenarios: Sequence[str],
+    values: np.ndarray,
+    *,
+    ylabel: str,
+    title: str,
+    ylim: tuple[float, float],
+    annotate_delta: bool,
+    show_legend: bool,
+) -> None:
     n, ns = len(models), len(scenarios)
-    fig, ax = plt.subplots(figsize=(max(9.0, 2.5 * n), 5.2), constrained_layout=True)
     x, width = np.arange(n), 0.8 / max(ns, 1)
     bi = scenarios.index("baseline") if "baseline" in scenarios else 0
     for si, scen in enumerate(scenarios):
         off = (si - (ns - 1) / 2) * width
-        col = f1[:, si]
+        col = values[:, si]
         bars = ax.bar(
             x + off, col, width, color=PALETTE.get(scen, "#888888"),
             label=SCENARIO_LABELS.get(scen, scen), edgecolor="white", linewidth=0.6,
@@ -104,15 +188,16 @@ def plot_degradation(models: Sequence[str], scenarios: Sequence[str], f1: np.nda
             for bar in bars:
                 bar.set_hatch("//")
         ax.bar_label(bars, labels=[f"{v:.2f}" if np.isfinite(v) else "" for v in col], padding=2, fontsize=10)
-        if si == bi:
+        if si == bi or not annotate_delta:
             continue
-        delta = col - f1[:, bi]
+        delta = col - values[:, bi]
+        attack_rank = sum(1 for prev_idx, scenario in enumerate(scenarios[:si]) if prev_idx != bi)
         for idx, bar in enumerate(bars):
             if np.isfinite(delta[idx]):
                 ax.annotate(
-                    f"Delta {delta[idx]:+.2f}",
+                    f"Change {delta[idx]:+.2f}",
                     xy=(bar.get_x() + bar.get_width() / 2, bar.get_height()),
-                    xytext=(0, 14),
+                    xytext=(0, 14 + 12 * attack_rank),
                     textcoords="offset points",
                     ha="center",
                     fontsize=9,
@@ -120,14 +205,68 @@ def plot_degradation(models: Sequence[str], scenarios: Sequence[str], f1: np.nda
                     fontweight="bold",
                 )
     ax.set(
-        ylabel="Macro-F1 (test set)",
-        title="Macro-F1 drops under realistic adversarial profiles (bots perturbed)",
-        ylim=(0, 1.08),
+        ylabel=ylabel,
+        title=title,
+        ylim=ylim,
         xticks=x,
         xticklabels=[MODEL_LABELS.get(m, pretty_model(m)) for m in models],
     )
     ax.grid(True, alpha=0.25, axis="y")
-    ax.legend(loc="lower center", ncol=ns, bbox_to_anchor=(0.5, -0.22), frameon=False)
+    if show_legend:
+        ax.legend(loc="lower center", ncol=ns, bbox_to_anchor=(0.5, -0.28), frameon=False)
+
+
+def plot_degradation(
+    models: Sequence[str],
+    scenarios: Sequence[str],
+    f1: np.ndarray,
+    attacked_recall: np.ndarray | None = None,
+) -> mpl.figure.Figure:
+    if attacked_recall is None:
+        fig, ax = plt.subplots(figsize=(max(9.0, 2.5 * len(models)), 5.2), constrained_layout=True)
+        _plot_grouped_metric(
+            ax,
+            models,
+            scenarios,
+            f1,
+            ylabel="Macro-F1 (test set)",
+            title=_degradation_description(f1, scenarios)[0],
+            ylim=(0, 1.08),
+            annotate_delta=True,
+            show_legend=True,
+        )
+        return fig
+
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(max(9.5, 2.5 * len(models)), 8.2),
+        constrained_layout=True,
+        sharex=True,
+    )
+    fig.suptitle("Measured robustness under selected adversarial profiles")
+    _plot_grouped_metric(
+        axes[0],
+        models,
+        scenarios,
+        attacked_recall,
+        ylabel="Recall on attacked true bots",
+        title="Attacked true-bot recall (primary evidence)",
+        ylim=(0, 1.08),
+        annotate_delta=False,
+        show_legend=True,
+    )
+    _plot_grouped_metric(
+        axes[1],
+        models,
+        scenarios,
+        f1,
+        ylabel="Macro-F1 (test set)",
+        title="Full-test Macro-F1 (conservative global context)",
+        ylim=(0, 1.08),
+        annotate_delta=False,
+        show_legend=False,
+    )
     return fig
 
 
@@ -135,8 +274,30 @@ def _pr_cell(value: float) -> str:
     return "not available" if not math.isfinite(float(value)) else f"{float(value):.2f}"
 
 
+def _attack_targeted_summary_sentence(attacked_recall: np.ndarray, scenarios: Sequence[str]) -> str:
+    deltas = _attack_deltas(attacked_recall, scenarios)
+    if deltas.size == 0:
+        return "Attacked true-bot recall is unavailable for the selected scenarios."
+    bi = scenarios.index("baseline")
+    attack_scenarios = [scenario for idx, scenario in enumerate(scenarios) if idx != bi]
+    mean_deltas = np.nanmean(deltas, axis=0)
+    worst_idx = int(np.nanargmin(mean_deltas))
+    worst_scenario = attack_scenarios[worst_idx]
+    worst_delta = float(mean_deltas[worst_idx])
+    return (
+        "Attacked true-bot recall is the primary evidence because only true-bot rows are perturbed; "
+        f"the largest mean delta occurs under {SCENARIO_LABELS.get(worst_scenario, worst_scenario)} "
+        f"({worst_delta:+.02f} vs baseline)."
+    )
+
+
 def degradation_caption(
-    models: Sequence[str], scenarios: Sequence[str], pr: np.ndarray, pairwise: Sequence[Mapping[str, Any]],
+    models: Sequence[str],
+    scenarios: Sequence[str],
+    f1: np.ndarray,
+    pr: np.ndarray,
+    pairwise: Sequence[Mapping[str, Any]],
+    attacked_recall: np.ndarray | None = None,
 ) -> str:
     count = len(models)
     model_phrase = f"top-{count} model{'s' if count != 1 else ''}" if count else "selected models"
@@ -144,19 +305,38 @@ def degradation_caption(
         "the highest-ranked model" if count == 1 else f"the {count} highest-ranked models"
     ) if count else "the selected models"
     scenario_labels = {scenario: SCENARIO_LABELS.get(scenario, scenario) for scenario in scenarios}
+    takeaway, summary = _degradation_description(f1, scenarios)
     pr_lines = "\n".join(
         f"- **{MODEL_LABELS.get(model, pretty_model(model))}** - "
         + ", ".join(f"{scenario_labels[scenario]} {_pr_cell(pr[mi, sj])}" for sj, scenario in enumerate(scenarios))
         + "."
         for mi, model in enumerate(models)
     )
-    body = (
-        f"**Figure H1. Macro-F1 under clean vs adversarial conditions ({model_phrase}, TwiBot-20 test).**\n\n"
-        f"Grouped bars show Macro-F1 for {ranked_phrase} on the baseline (clean) test set, under "
-        "cost-only cheap attacks, and under the realistic mixed profile. Attacks are applied only to "
-        "true-bot rows. Numeric labels show point Macro-F1; Delta values above attack bars show the "
-        "drop relative to that model's clean baseline.\n\n**PR-AUC by scenario:**\n\n" + pr_lines
-    )
+    if attacked_recall is None:
+        body = (
+            f"**Figure H1. {takeaway} ({model_phrase}, TwiBot-20 test).**\n\n"
+            f"Grouped bars show Macro-F1 for {ranked_phrase} on the baseline (clean) test set, under "
+            "cost-only cheap attacks, and under the realistic mixed profile. Attacks are applied only to "
+            "true-bot rows. Numeric labels show point Macro-F1; Change values above attack bars show the "
+            "difference relative to that model's clean baseline. "
+            + summary
+            + "\n\n**PR-AUC by scenario:**\n\n"
+            + pr_lines
+        )
+    else:
+        body = (
+            f"**Figure H1. Measured robustness under selected adversarial profiles ({model_phrase}, TwiBot-20 test).**\n\n"
+            f"The top panel shows attacked true-bot recall for {ranked_phrase}; this is the primary evidence "
+            "because only true-bot rows are perturbed. The bottom panel keeps Full-test Macro-F1 as conservative "
+            "global context rather than the main attack-severity claim. "
+            + _attack_targeted_summary_sentence(attacked_recall, scenarios)
+            + " "
+            + summary
+            + "\n\n**Attacked true-bot recall:** plotted directly as the primary robustness signal.\n\n"
+            + f"**Full-test Macro-F1:** {takeaway}. This remains a conservative global metric because human rows are unchanged.\n\n"
+            + "**PR-AUC by scenario:**\n\n"
+            + pr_lines
+        )
     best_row, best_p = None, float("inf")
     for row in pairwise or []:
         if str(row.get("metric", "")) != "f1":

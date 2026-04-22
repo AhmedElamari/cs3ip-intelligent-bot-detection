@@ -28,24 +28,19 @@ def _poster_figures():
     return importlib.import_module("benchmarking.poster_figures")
 
 
-def _make_three_model_benchmark() -> ModelBenchmark:
-    """Minimal benchmark state so dissertation PR + CM figures can render."""
-    rng = np.random.default_rng(2112)
-    n = 24
+def _make_benchmark(specs, experiment_name: str, seed: int = 2112, *, interpretable=None) -> ModelBenchmark:
+    rng = np.random.default_rng(seed)
     y_test = np.concatenate([np.zeros(12), np.ones(12)]).astype(int)
-    b = ModelBenchmark(models={}, experiment_name="stub_three")
+    b = ModelBenchmark(models={}, experiment_name=experiment_name)
     b.y_test = y_test
-    specs = [
-        ("m_a", 0.92, 0.81, 0.79),
-        ("m_b", 0.88, 0.82, 0.78),
-        ("m_c", 0.84, 0.83, 0.77),
-    ]
+    if interpretable is None:
+        interpretable = lambda _name: True
     b.results = {}
     b.predictions = {}
     b.probabilities = {}
     for name, f1m, roc, pr_auc in specs:
-        y_pred = rng.integers(0, 2, size=n)
-        proba = rng.random((n, 2))
+        y_pred = rng.integers(0, 2, size=len(y_test))
+        proba = rng.random((len(y_test), 2))
         proba = proba / proba.sum(axis=1, keepdims=True)
         b.predictions[name] = y_pred
         b.probabilities[name] = proba
@@ -59,7 +54,7 @@ def _make_three_model_benchmark() -> ModelBenchmark:
             "val_metrics": {},
             "test_metrics": tm,
             "feature_importance": None,
-            "is_interpretable": True,
+            "is_interpretable": interpretable(name),
             "X_train": None,
             "X_val": None,
             "X_test": None,
@@ -69,35 +64,94 @@ def _make_three_model_benchmark() -> ModelBenchmark:
     return b
 
 
+def _make_three_model_benchmark() -> ModelBenchmark:
+    """Minimal benchmark state so dissertation PR + CM figures can render."""
+    return _make_benchmark(
+        [
+            ("m_a", 0.92, 0.81, 0.79),
+            ("m_b", 0.88, 0.82, 0.78),
+            ("m_c", 0.84, 0.83, 0.77),
+        ],
+        "stub_three",
+    )
+
+
 def _make_one_model_benchmark() -> ModelBenchmark:
-    rng = np.random.default_rng(42)
-    n = 16
-    y_test = np.concatenate([np.zeros(8), np.ones(8)]).astype(int)
-    b = ModelBenchmark(models={}, experiment_name="stub_one")
-    b.y_test = y_test
-    name = "solo"
-    y_pred = rng.integers(0, 2, size=n)
-    proba = rng.random((n, 2))
-    proba = proba / proba.sum(axis=1, keepdims=True)
-    b.predictions[name] = y_pred
-    b.probabilities[name] = proba
-    tm = b.metrics_calculator.compute_all_metrics(y_test, y_pred, proba)
-    tm["f1_macro"] = 0.9
-    tm["roc_auc"] = 0.85
-    b.results[name] = {
-        "model": None,
-        "training_time": 1.0,
-        "val_metrics": {},
-        "test_metrics": tm,
-        "feature_importance": None,
-        "is_interpretable": True,
-        "X_train": None,
-        "X_val": None,
-        "X_test": None,
-        "feature_names": [],
-        "scaler": None,
-    }
-    return b
+    return _make_benchmark([("solo", 0.9, 0.85, 0.8)], "stub_one", seed=42)
+
+
+def _make_named_best_model_benchmark(best_name: str = "xgboost") -> ModelBenchmark:
+    return _make_benchmark(
+        [(best_name, 0.91, 0.86, 0.84), ("decision_tree", 0.88, 0.82, 0.8)],
+        "stub_named",
+        interpretable=lambda name: name == "decision_tree",
+    )
+
+
+def _degradation_rows(
+    models,
+    scenario_values=(("baseline", 0.9), ("cheap_only", 0.85), ("realistic_mixed", 0.8)),
+    pr_auc=0.7,
+):
+    return [
+        {"model": model, "scenario": scenario, "macro_f1": f1, "pr_auc": pr_auc}
+        for model in models
+        for scenario, f1 in scenario_values
+    ]
+
+
+def _robustness_summary_rows(models):
+    rows = []
+    for model in models:
+        rows.extend([
+            {
+                "model": model,
+                "profile": "cheap_only",
+                "attacked_true_bots": 120,
+                "baseline_detected_bots": 118,
+                "flip_rate": 0.0339,
+                "confidence_drop_mean": 0.0711,
+                "confidence_drop_median": 0.0680,
+                "confidence_drop_std": 0.0500,
+                "confidence_drop_non_flip_mean": 0.0692,
+                "attacked_bot_recall_baseline": 0.9833,
+                "attacked_bot_recall": 0.9500,
+                "attacked_bot_recall_delta": -0.0333,
+                "attacked_bot_mean_probability_baseline": 0.8400,
+                "attacked_bot_mean_probability": 0.7700,
+                "attacked_bot_mean_probability_delta": -0.0700,
+            },
+            {
+                "model": model,
+                "profile": "realistic_mixed",
+                "attacked_true_bots": 120,
+                "baseline_detected_bots": 118,
+                "flip_rate": 0.0424,
+                "confidence_drop_mean": 0.0752,
+                "confidence_drop_median": 0.0710,
+                "confidence_drop_std": 0.0520,
+                "confidence_drop_non_flip_mean": 0.0734,
+                "attacked_bot_recall_baseline": 0.9833,
+                "attacked_bot_recall": 0.9417,
+                "attacked_bot_recall_delta": -0.0416,
+                "attacked_bot_mean_probability_baseline": 0.8400,
+                "attacked_bot_mean_probability": 0.7600,
+                "attacked_bot_mean_probability_delta": -0.0800,
+            },
+        ])
+    return rows
+
+
+def _with_robustness_data(
+    bench: ModelBenchmark,
+    models,
+    scenario_values=(("baseline", 0.9), ("cheap_only", 0.85), ("realistic_mixed", 0.8)),
+):
+    import pandas as pd
+
+    bench.robustness_degradation = pd.DataFrame(_degradation_rows(models, scenario_values))
+    bench.robustness_summary = pd.DataFrame(_robustness_summary_rows(models))
+    return bench
 
 
 class _FinalOutputStub:
@@ -147,6 +201,28 @@ class _FinalOutputStubWithScoreboard(_FinalOutputStub):
 
 
 class OutputUtilsTest(unittest.TestCase):
+    def _caption_case(
+        self,
+        *,
+        attacked_recall=(0.8, 0.72),
+        f1=(0.7, 0.65),
+        pr=(0.7, 0.65),
+        scenarios=("baseline", "cheap_only"),
+        models=("m_a",),
+    ):
+        return _poster_figures().degradation_caption(
+            list(models),
+            scenarios,
+            np.array([f1]),
+            np.array([pr]),
+            [],
+            np.array([attacked_recall]),
+        )
+
+    def _assert_attack_targeted_caption(self, caption: str) -> None:
+        self.assertIn("Attacked true-bot recall", caption)
+        self.assertIn("Full-test Macro-F1", caption)
+
     def test_module_avoids_top_level_optional_plot_imports(self):
         tree = ast.parse(_MODULE_PATH.read_text(encoding="utf-8"))
         top_level = {
@@ -376,12 +452,7 @@ class OutputUtilsTest(unittest.TestCase):
         save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
-            bench = _make_three_model_benchmark()
-            rows = []
-            for m in ("m_a", "m_b", "m_c"):
-                for s, f1 in (("baseline", 0.9), ("cheap_only", 0.85), ("realistic_mixed", 0.8)):
-                    rows.append({"model": m, "scenario": s, "macro_f1": f1, "pr_auc": 0.7})
-            bench.robustness_degradation = pd.DataFrame(rows)
+            bench = _with_robustness_data(_make_three_model_benchmark(), ("m_a", "m_b", "m_c"))
             save_robustness_degradation_figure(bench, out)
             p = out / "robustness_profile_degradation.png"
             self.assertTrue(p.exists())
@@ -432,12 +503,7 @@ class OutputUtilsTest(unittest.TestCase):
         save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
-            bench = _make_three_model_benchmark()
-            rows = []
-            for m in ("m_a", "m_b", "m_c"):
-                for s, f1 in (("baseline", 0.9), ("cheap_only", 0.85), ("realistic_mixed", 0.8)):
-                    rows.append({"model": m, "scenario": s, "macro_f1": f1, "pr_auc": 0.7})
-            bench.robustness_degradation = pd.DataFrame(rows)
+            bench = _with_robustness_data(_make_three_model_benchmark(), ("m_a", "m_b", "m_c"))
             save_robustness_degradation_figure(bench, out)
             self.assertTrue((out / "robustness_profile_degradation.pdf").exists())
             cap = out / "robustness_profile_degradation_caption.md"
@@ -445,21 +511,118 @@ class OutputUtilsTest(unittest.TestCase):
             text = cap.read_text(encoding="utf-8")
             self.assertIn("PR-AUC", text)
             self.assertIn("Macro-F1", text)
+            self.assertIn("Attacked true-bot recall", text)
+            self.assertIn("global context", text.lower())
 
-    def test_degradation_caption_mentions_delta(self):
-        try:
-            import pandas as pd
-        except ImportError:
-            self.skipTest("pandas not installed")
-        degradation_caption = _poster_figures().degradation_caption
-
-        models = ["m_a"]
-        scenarios = ("baseline", "cheap_only")
-        pr = np.array([[0.7, 0.65]])
-        cap = degradation_caption(models, scenarios, pr, [])
+    def test_degradation_caption_mentions_attack_targeted_primary_metric(self):
+        cap = self._caption_case()
         self.assertIn("top-1 model", cap)
         self.assertNotIn("top-3 models", cap)
-        self.assertTrue("Δ" in cap or "delta" in cap.lower())
+        self._assert_attack_targeted_caption(cap)
+        self.assertIn("global context", cap.lower())
+        self.assertIn("delta", cap.lower())
+
+    def test_degradation_caption_wording_follows_metric_shape(self):
+        cases = [
+            {
+                "label": "stable",
+                "kwargs": {
+                    "attacked_recall": (0.98, 0.94, 0.93),
+                    "f1": (0.8051, 0.8084, 0.8084),
+                    "pr": (0.8384, 0.7933, 0.7873),
+                    "scenarios": ("baseline", "cheap_only", "realistic_mixed"),
+                    "models": ("xgboost",),
+                },
+                "contains": ("stable",),
+                "excludes": (
+                    "drops under realistic adversarial profiles",
+                    "drop relative to",
+                ),
+            },
+            {
+                "label": "slightly lower",
+                "kwargs": {
+                    "attacked_recall": (0.99, 0.96, 0.96),
+                    "f1": (0.8051, 0.7914, 0.7930),
+                    "pr": (0.8384, 0.6336, 0.6278),
+                    "scenarios": ("baseline", "cheap_only", "realistic_mixed"),
+                    "models": ("xgboost",),
+                },
+                "contains": ("slightly lower", "mixed realistic attacks"),
+                "excludes": ("macro-f1 declines",),
+            },
+        ]
+        for case in cases:
+            with self.subTest(case=case["label"]):
+                cap = self._caption_case(**case["kwargs"])
+                self._assert_attack_targeted_caption(cap)
+                for text in case["contains"]:
+                    self.assertIn(text, cap.lower())
+                for text in case["excludes"]:
+                    self.assertNotIn(text, cap.lower())
+
+    def test_plot_degradation_titles_follow_metric_shape(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+        plot_degradation = _poster_figures().plot_degradation
+
+        cases = [
+            ("stable", np.array([[0.8051, 0.8084, 0.8084], [0.8024, 0.8057, 0.8057]])),
+            ("slightly lower", np.array([[0.8051, 0.7914, 0.7930], [0.8024, 0.8008, 0.8008]])),
+        ]
+        for expected, values in cases:
+            with self.subTest(title=expected):
+                fig = plot_degradation(
+                    ["xgboost", "decision_tree"],
+                    ("baseline", "cheap_only", "realistic_mixed"),
+                    values,
+                )
+                ax = fig.axes[0]
+                self.assertIn(expected, ax.get_title().lower())
+                self.assertNotIn("drops under realistic adversarial profiles", ax.get_title().lower())
+                if expected == "stable":
+                    change_texts = [text for text in ax.texts if text.get_text().startswith("Change ")]
+                    self.assertGreaterEqual(len(change_texts), 2)
+                    self.assertGreater(len({text.get_position()[1] for text in change_texts}), 1)
+                else:
+                    self.assertNotIn("declines", ax.get_title().lower())
+                plt.close(fig)
+
+    def test_plot_degradation_supports_attack_targeted_dual_metric_layout(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+        plot_degradation = _poster_figures().plot_degradation
+
+        fig = plot_degradation(
+            ["xgboost", "decision_tree"],
+            ("baseline", "cheap_only", "realistic_mixed"),
+            np.array([[0.8051, 0.7940, 0.7920], [0.8024, 0.8008, 0.8008]]),
+            np.array([[0.98, 0.95, 0.94], [0.99, 0.97, 0.96]]),
+        )
+        self.assertEqual(len(fig.axes), 2)
+        self.assertIn("Attacked true-bot recall", fig.axes[0].get_title())
+        self.assertIn("Full-test Macro-F1", fig.axes[1].get_title())
+        plt.close(fig)
+
+    def test_plot_best_confusion_matrix_uses_takeaway_title_and_pretty_model_name(self):
+        try:
+            import matplotlib.pyplot as plt
+            import seaborn  # noqa: F401
+        except ImportError:
+            self.skipTest("matplotlib/seaborn not installed")
+
+        benchmark = _make_named_best_model_benchmark("xgboost")
+        fig = benchmark.plot_best_confusion_matrix(normalize="true")
+        ax = fig.axes[0]
+        title = ax.get_title()
+        self.assertIn("XGBoost", title)
+        self.assertNotIn("xgboost", title)
+        self.assertNotIn("Confusion Matrix (Normalized by True Label)", title)
+        plt.close(fig)
 
     def test_vulnerability_figure_writes_pdf_and_caption(self):
         try:
@@ -548,10 +711,11 @@ class OutputUtilsTest(unittest.TestCase):
         with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
             out = Path(tmp)
             bench = _make_three_model_benchmark()
-            bench.robustness_degradation = pd.DataFrame([
-                {"model": "m_a", "scenario": "baseline", "macro_f1": 0.9, "pr_auc": 0.7},
-                {"model": "m_a", "scenario": "cheap_only", "macro_f1": 0.85, "pr_auc": 0.65},
-            ])
+            _with_robustness_data(
+                bench,
+                ("m_a",),
+                (("baseline", 0.9), ("cheap_only", 0.85)),
+            )
             output_utils.save_robustness_degradation_figure(bench, out)
             rows = [{"model": "m_a", "feature": "f0", "attack_name": "a", "cost_tier": "cheap",
                      "flip_rate": 0.5, "confidence_drop_mean": 0.1}]
@@ -561,7 +725,6 @@ class OutputUtilsTest(unittest.TestCase):
         with poster_style():
             _ = plt.rcParams["font.size"]
         self.assertEqual(float(plt.rcParams["font.size"]), before)
-
 
 if __name__ == "__main__":
     unittest.main()
