@@ -415,24 +415,27 @@ class RobustnessAnalyzer:
         diagnostics = results.get('profile_diagnostics', pd.DataFrame())
         output: Dict[str, Any] = {}
         for profile in cls._sorted_unique(summary, 'profile') or cls._sorted_unique(diagnostics, 'profile'):
-            profile_summary = summary[summary.get('profile') == profile] if 'profile' in summary else pd.DataFrame()
+            profile_summary = summary[summary['profile'] == profile] if 'profile' in summary else pd.DataFrame()
             profile_diagnostics = (
-                diagnostics[diagnostics.get('profile') == profile] if 'profile' in diagnostics else pd.DataFrame()
+                diagnostics[diagnostics['profile'] == profile] if 'profile' in diagnostics else pd.DataFrame()
             )
             profile_degradation = (
-                degradation[degradation.get('scenario') == profile] if 'scenario' in degradation else pd.DataFrame()
+                degradation[degradation['scenario'] == profile] if 'scenario' in degradation else pd.DataFrame()
+            )
+            applied_mask = (
+                profile_diagnostics['recipe_applied'].fillna(False).astype(bool)
+                if 'recipe_applied' in profile_diagnostics
+                else pd.Series(False, index=profile_diagnostics.index)
+            )
+            expensive_mask = (
+                profile_diagnostics['cost_tier'].eq('expensive')
+                if 'cost_tier' in profile_diagnostics
+                else pd.Series(False, index=profile_diagnostics.index)
             )
             output[str(profile)] = {
                 'recipe_count': int(len(profile_diagnostics)),
-                'applied_recipe_count': int(
-                    profile_diagnostics['recipe_applied'].fillna(False).astype(bool).sum()
-                ) if 'recipe_applied' in profile_diagnostics else 0,
-                'changed_expensive_recipe_count': int(
-                    (
-                        (profile_diagnostics.get('cost_tier') == 'expensive') &
-                        profile_diagnostics.get('recipe_applied', pd.Series(dtype=bool)).fillna(False).astype(bool)
-                    ).sum()
-                ) if not profile_diagnostics.empty else 0,
+                'applied_recipe_count': int(applied_mask.sum()),
+                'changed_expensive_recipe_count': int((expensive_mask & applied_mask).sum()),
                 'changed_columns': sorted({
                     column
                     for columns in profile_diagnostics.get('changed_columns', pd.Series(dtype=str)).fillna('')
