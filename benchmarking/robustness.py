@@ -31,6 +31,7 @@ def run_robustness_analysis(
     benchmark.robustness_summary = results['summary']
     benchmark.robustness_degradation = results['degradation']
     benchmark.feature_attack_results = results['feature_attacks']
+    benchmark.robustness_profile_diagnostics = results['profile_diagnostics']
     return results
 
 
@@ -73,6 +74,7 @@ class RobustnessAnalyzer:
             .sort_values(self.feature_names, kind='mergesort')
             .reset_index(drop=True)
         )
+        profile_diagnostics = self._profile_diagnostics_frame(attacked_base)
 
         for model_name, result in self.benchmark.results.items():
             model = result['model']
@@ -81,6 +83,7 @@ class RobustnessAnalyzer:
             baseline_proba = self._bot_probability(model, baseline_inputs)
             baseline_detected_mask = baseline_preds == 1
             baseline_detected_count = int(baseline_detected_mask.sum())
+            baseline_attacked_metrics = self._attacked_population_metrics(baseline_preds, baseline_proba)
 
             degradation_rows.extend(self._degradation_rows(model_name, model))
 
@@ -111,6 +114,7 @@ class RobustnessAnalyzer:
                             baseline_detected_mask,
                             baseline_detected_count,
                             baseline_proba,
+                            baseline_attacked_metrics,
                             model,
                         )
                     )
@@ -119,6 +123,7 @@ class RobustnessAnalyzer:
             'summary': pd.DataFrame(summary_rows),
             'feature_attacks': pd.DataFrame(feature_rows),
             'degradation': pd.DataFrame(degradation_rows),
+            'profile_diagnostics': profile_diagnostics,
         }
 
     def _attack_population_mask(self) -> np.ndarray:
@@ -136,6 +141,26 @@ class RobustnessAnalyzer:
         macro_f1 = float(f1_score(y, preds, average='macro', zero_division=0))
         pr_auc = float(average_precision_score(y, proba))
         return {'macro_f1': macro_f1, 'pr_auc': pr_auc}
+
+    def _profile_diagnostics_frame(self, attacked_base: pd.DataFrame) -> pd.DataFrame:
+        rows: List[Dict[str, Any]] = []
+        for profile in self.profiles:
+            result = self.engine.apply_profile(attacked_base, profile)
+            rows.extend(result.diagnostics)
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _attacked_population_metrics(preds: np.ndarray, proba: np.ndarray) -> Dict[str, float]:
+        attacked_true_bots = len(preds)
+        if attacked_true_bots == 0:
+            return {
+                'attacked_bot_recall': np.nan,
+                'attacked_bot_mean_probability': np.nan,
+            }
+        return {
+            'attacked_bot_recall': float(np.mean(preds == 1)),
+            'attacked_bot_mean_probability': float(np.mean(proba)),
+        }
 
     def _build_profile_perturbed_full_test(self, profile: str) -> pd.DataFrame:
         """Full test matrix with profile applied to true-bot rows only (index-aligned)."""
@@ -231,6 +256,7 @@ class RobustnessAnalyzer:
         baseline_detected_mask: np.ndarray,
         baseline_detected_count: int,
         baseline_proba: np.ndarray,
+        baseline_attacked_metrics: Dict[str, float],
         model: Any,
     ) -> Dict[str, Any]:
         row = {
@@ -245,6 +271,12 @@ class RobustnessAnalyzer:
             'confidence_drop_median': np.nan,
             'confidence_drop_std': np.nan,
             'confidence_drop_non_flip_mean': np.nan,
+            'attacked_bot_recall_baseline': baseline_attacked_metrics['attacked_bot_recall'],
+            'attacked_bot_recall': np.nan,
+            'attacked_bot_recall_delta': np.nan,
+            'attacked_bot_mean_probability_baseline': baseline_attacked_metrics['attacked_bot_mean_probability'],
+            'attacked_bot_mean_probability': np.nan,
+            'attacked_bot_mean_probability_delta': np.nan,
         }
         if not profile_result.applied:
             return row
@@ -252,6 +284,7 @@ class RobustnessAnalyzer:
         mutated_inputs = self.benchmark.prepare_eval_inputs(model_name, profile_result.data)
         mutated_preds = np.asarray(model.predict(mutated_inputs))
         mutated_proba = self._bot_probability(model, mutated_inputs)
+        attacked_metrics = self._attacked_population_metrics(mutated_preds, mutated_proba)
         row.update(
             self._prediction_metrics(
                 baseline_detected_mask,
@@ -261,6 +294,17 @@ class RobustnessAnalyzer:
                 mutated_proba,
             )
         )
+        row.update({
+            'attacked_bot_recall': attacked_metrics['attacked_bot_recall'],
+            'attacked_bot_recall_delta': (
+                attacked_metrics['attacked_bot_recall'] - baseline_attacked_metrics['attacked_bot_recall']
+            ),
+            'attacked_bot_mean_probability': attacked_metrics['attacked_bot_mean_probability'],
+            'attacked_bot_mean_probability_delta': (
+                attacked_metrics['attacked_bot_mean_probability'] -
+                baseline_attacked_metrics['attacked_bot_mean_probability']
+            ),
+        })
         return row
 
     def _prediction_metrics(
@@ -312,6 +356,7 @@ class RobustnessAnalyzer:
             'summary': 'robustness_summary.csv',
             'feature_attacks': 'feature_attack_results.csv',
             'degradation': 'robustness_degradation.csv',
+            'profile_diagnostics': 'profile_diagnostics.csv',
         }
         for key, filename in file_map.items():
             format_frame_for_export(sorted_results[key]).to_csv(output_dir / filename, index=False)
@@ -322,6 +367,7 @@ class RobustnessAnalyzer:
                 for key, filename in file_map.items()
             },
             'overview': self._report_overview(sorted_results),
+            'profile_sanity': self._profile_sanity(sorted_results),
         }
         with open(output_dir / 'robustness_report.json', 'w', encoding='utf-8') as handle:
             json.dump(
@@ -355,10 +401,52 @@ class RobustnessAnalyzer:
             'attacked_true_bots_total': cls._sum_column(summary, 'attacked_true_bots'),
             'mean_flip_rate': cls._mean_column(summary, 'flip_rate'),
             'mean_confidence_drop': cls._mean_column(feature_attacks, 'confidence_drop_mean'),
+            'mean_attacked_bot_recall_delta': cls._mean_column(summary, 'attacked_bot_recall_delta'),
+            'mean_attacked_bot_mean_probability_delta': cls._mean_column(summary, 'attacked_bot_mean_probability_delta'),
             'mean_macro_f1': cls._mean_column(degradation, 'macro_f1'),
             'mean_pr_auc': cls._mean_column(degradation, 'pr_auc'),
         }
         return overview
+
+    @classmethod
+    def _profile_sanity(cls, results: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+        summary = results.get('summary', pd.DataFrame())
+        degradation = results.get('degradation', pd.DataFrame())
+        diagnostics = results.get('profile_diagnostics', pd.DataFrame())
+        output: Dict[str, Any] = {}
+        for profile in cls._sorted_unique(summary, 'profile') or cls._sorted_unique(diagnostics, 'profile'):
+            profile_summary = summary[summary.get('profile') == profile] if 'profile' in summary else pd.DataFrame()
+            profile_diagnostics = (
+                diagnostics[diagnostics.get('profile') == profile] if 'profile' in diagnostics else pd.DataFrame()
+            )
+            profile_degradation = (
+                degradation[degradation.get('scenario') == profile] if 'scenario' in degradation else pd.DataFrame()
+            )
+            output[str(profile)] = {
+                'recipe_count': int(len(profile_diagnostics)),
+                'applied_recipe_count': int(
+                    profile_diagnostics['recipe_applied'].fillna(False).astype(bool).sum()
+                ) if 'recipe_applied' in profile_diagnostics else 0,
+                'changed_expensive_recipe_count': int(
+                    (
+                        (profile_diagnostics.get('cost_tier') == 'expensive') &
+                        profile_diagnostics.get('recipe_applied', pd.Series(dtype=bool)).fillna(False).astype(bool)
+                    ).sum()
+                ) if not profile_diagnostics.empty else 0,
+                'changed_columns': sorted({
+                    column
+                    for columns in profile_diagnostics.get('changed_columns', pd.Series(dtype=str)).fillna('')
+                    for column in str(columns).split(';')
+                    if column
+                }),
+                'mean_changed_rows': cls._mean_column(profile_diagnostics, 'changed_rows'),
+                'mean_relative_delta': cls._mean_column(profile_diagnostics, 'mean_relative_delta'),
+                'mean_flip_rate': cls._mean_column(profile_summary, 'flip_rate'),
+                'mean_attacked_bot_recall_delta': cls._mean_column(profile_summary, 'attacked_bot_recall_delta'),
+                'mean_macro_f1': cls._mean_column(profile_degradation, 'macro_f1'),
+                'mean_pr_auc': cls._mean_column(profile_degradation, 'pr_auc'),
+            }
+        return output
 
     @staticmethod
     def _sorted_unique(frame: pd.DataFrame, column: str) -> List[Any]:
@@ -430,6 +518,7 @@ class RobustnessAnalyzer:
             'summary': ['model', 'profile'],
             'feature_attacks': ['model', 'feature'],
             'degradation': ['model', 'scenario'],
+            'profile_diagnostics': ['profile', 'cost_tier', 'feature'],
         }
         sorted_results = {}
         for key, frame in results.items():

@@ -36,8 +36,8 @@ def _pretty_model_name(model_name: str) -> str:
 
 def _caption(model_name: str, top_n: int) -> str:
     return (
-        f"Global SHAP beeswarm for {_pretty_model_name(model_name)} on the evaluation test split "
-        f"(top {top_n} features by mean |SHAP|). Each dot is one account; horizontal position is that "
+        f"{_pretty_model_name(model_name)} relies on a compact set of interpretable profile signals on the "
+        f"evaluation test split. Global SHAP beeswarm (top {top_n} features by mean |SHAP|). Each dot is one account; horizontal position is that "
         'feature\'s contribution to the log-odds of "bot", colour encodes feature value '
         "(red=high, blue=low). The model's decision is dominated by profile-metadata signals - "
         "verified status, followers/friends ratio, and account-age-normalised activity rates - rather "
@@ -45,6 +45,10 @@ def _caption(model_name: str, top_n: int) -> str:
         "features supports the interpretability claim and means adversarial robustness hinges on how "
         "easily an attacker can manipulate those specific profile attributes, not on hidden embeddings."
     )
+
+
+def _default_title(model_name: str) -> str:
+    return f"{_pretty_model_name(model_name)} relies on interpretable profile signals"
 
 
 def export_poster_shap(
@@ -69,11 +73,11 @@ def export_poster_shap(
         "xtick.labelsize": 13, "ytick.labelsize": 13,
     }):
         plt.figure(figsize=(12, 7))
+        title = title or _default_title(model_name)
         shap.summary_plot(
             shap_values, X, feature_names=display, max_display=top_n, plot_type="dot", show=False,
         )
-        if title:
-            plt.title(title)
+        plt.title(title)
         plt.tight_layout()
         fig = plt.gcf()
         png = out / f"{stem}.png"

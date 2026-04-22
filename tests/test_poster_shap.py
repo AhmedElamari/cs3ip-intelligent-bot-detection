@@ -45,6 +45,32 @@ class PosterShapExportTest(unittest.TestCase):
             self.assertNotIn("XGBoost", caption)
             self.assertNotIn("top 10 features", caption)
 
+    def test_export_poster_shap_sets_takeaway_title_by_default(self):
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+
+        fake_shap = types.SimpleNamespace(
+            summary_plot=lambda *_args, **_kwargs: plt.scatter([0, 1], [0, 1], s=10)
+        )
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp, unittest.mock.patch.dict(
+            sys.modules, {"shap": fake_shap}
+        ), unittest.mock.patch("matplotlib.pyplot.title") as mock_title:
+            export_poster_shap(
+                np.array([[0.2, -0.1], [0.1, 0.3]]),
+                np.array([[1.0, 2.0], [3.0, 4.0]]),
+                ["followers_count", "friends_count"],
+                model_name="xgboost",
+                output_dir=Path(tmp),
+                top_n=7,
+            )
+
+        mock_title.assert_called_once()
+        title = mock_title.call_args.args[0]
+        self.assertIn("XGBoost", title)
+        self.assertIn("interpretable", title.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

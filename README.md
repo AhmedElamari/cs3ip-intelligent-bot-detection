@@ -107,10 +107,11 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level flip / confidence metrics on true bots
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level attack-targeted robustness metrics on perturbed true bots, including attacked-bot recall deltas, flip rates, and confidence shifts
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature single-attack metrics
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_degradation.csv` — Macro-F1 and PR-AUC on the full test set (baseline vs each adversarial profile; bots perturbed only)
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_profile_degradation.png` / `.pdf` / `_caption.md` — poster-formatted grouped Macro-F1 bars for top-3 scoreboard models (baseline, `cheap_only`, `realistic_mixed`) with per-bar values and Δ drop annotations; caption carries PR-AUC and optional pairwise-significance summary
+- `results/benchmark_YYYYMMDD_HHMMSS/profile_diagnostics.csv` — per-profile recipe diagnostics showing which perturbation recipes applied, how many rows changed, which columns moved, and the effective numeric delta magnitudes
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_profile_degradation.png` / `.pdf` / `_caption.md` — poster-formatted robustness figure for the top-3 scoreboard models; attacked true-bot recall is the primary signal and full-test Macro-F1 is retained as conservative global context because only bot rows are perturbed
 - `results/benchmark_YYYYMMDD_HHMMSS/top_feature_vulnerabilities.csv` — top flip-rate features for the best model (single-feature attacks)
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_flip_rates_best_model.png` / `.pdf` / `_caption.md` — poster-formatted horizontal bars coloured by attack cost tier; top-8 profile features by flip-rate with % labels; caption frames attack surface
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` — machine-readable robustness summary

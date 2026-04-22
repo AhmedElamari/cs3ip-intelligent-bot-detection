@@ -31,6 +31,7 @@ class AttackResult:
     cost_tier: str
     attack_name: str
     skip_reason: str = ""
+    diagnostics: List[Dict[str, object]] = field(default_factory=list)
 
 
 class RealisticPerturbationEngine:
@@ -72,7 +73,10 @@ class RealisticPerturbationEngine:
         desc = human.get('description_length')
         if desc is not None:
             positive_desc = desc[desc > 0]
-            stats['description_length'] = float(positive_desc.median()) if not positive_desc.empty else 1.0
+            stats['description_length'] = (
+                float(positive_desc.quantile(0.25, interpolation='lower'))
+                if not positive_desc.empty else 1.0
+            )
         for feature in ('followers_count', 'friends_count'):
             series = human.get(feature)
             if series is not None:
@@ -163,27 +167,56 @@ class RealisticPerturbationEngine:
 
     def apply_profile(self, X: pd.DataFrame, profile: str) -> AttackResult:
         frame = self._to_frame(X)
+        before_profile = frame.copy()
         applied = False
+        diagnostics = []
         for recipe in self._recipes.values():
             if profile not in recipe.profile_membership:
                 continue
             if recipe.feature not in frame.columns:
                 continue
-            applied = recipe.mutation_rule(frame, self) or applied
+            before_recipe = frame.copy()
+            recipe_applied = recipe.mutation_rule(frame, self)
+            after_recipe = frame.copy()
+            diagnostics.append(
+                (recipe, recipe_applied, '' if recipe_applied else recipe.skip_reason, before_recipe, after_recipe)
+            )
+            applied = recipe_applied or applied
         if applied:
             self._recompute_derived(frame)
-        return AttackResult(frame, applied, None, 'profile', profile, '' if applied else 'no applicable feature recipes')
+        after_profile = frame.copy()
+        return AttackResult(
+            frame,
+            applied,
+            None,
+            'profile',
+            profile,
+            '' if applied else 'no applicable feature recipes',
+            diagnostics=[
+                self._profile_diagnostic(
+                    before_profile,
+                    after_profile,
+                    before_recipe,
+                    after_recipe,
+                    recipe,
+                    recipe_applied,
+                    profile,
+                    skip_reason,
+                )
+                for recipe, recipe_applied, skip_reason, before_recipe, after_recipe in diagnostics
+            ],
+        )
 
     def _apply_has_description(self, frame: pd.DataFrame) -> bool:
         changed = self._flip_binary(frame, 'has_description', 1)
         if 'description_length' in frame.columns:
             target = max(1.0, self._human_stats.get('description_length', 1.0))
-            changed = self._raise_to_target(frame, 'description_length', target) or changed
+            changed = self._set_short_human_bio(frame, target) or changed
         return changed
 
     def _apply_description_length(self, frame: pd.DataFrame) -> bool:
         target = max(1.0, self._human_stats.get('description_length', 1.0))
-        changed = self._raise_to_target(frame, 'description_length', target)
+        changed = self._set_short_human_bio(frame, target)
         if 'has_description' in frame.columns:
             changed = self._flip_binary(frame, 'has_description', 1) or changed
         return changed
@@ -195,12 +228,13 @@ class RealisticPerturbationEngine:
         frame[feature] = target
         return not before.equals(frame[feature])
 
-    def _raise_to_target(self, frame: pd.DataFrame, feature: str, target: float) -> bool:
-        if feature not in frame.columns:
+    def _set_short_human_bio(self, frame: pd.DataFrame, target: float) -> bool:
+        if 'description_length' not in frame.columns:
             return False
-        before = frame[feature].copy()
-        frame[feature] = np.maximum(frame[feature], target)
-        return not before.equals(frame[feature])
+        before = frame['description_length'].copy()
+        current = frame['description_length'].astype(float)
+        frame['description_length'] = np.where(current <= 0, target, np.minimum(current, target))
+        return not before.equals(frame['description_length'])
 
     def _nudge_count(self, frame: pd.DataFrame, feature: str) -> bool:
         if feature not in frame.columns:
@@ -227,3 +261,78 @@ class RealisticPerturbationEngine:
             frame['tweets_per_day'] = frame['statuses_count'] / safe_age
         if {'favourites_count', 'favourites_per_day'}.issubset(frame.columns):
             frame['favourites_per_day'] = frame['favourites_count'] / safe_age
+
+    @staticmethod
+    def _changed_mask(before: pd.Series, after: pd.Series) -> pd.Series:
+        return ~(before.eq(after) | (before.isna() & after.isna()))
+
+    @staticmethod
+    def _stable_numeric_stats(values: pd.Series) -> tuple[float, float]:
+        numeric = pd.to_numeric(values, errors='coerce')
+        if numeric.notna().sum() == 0:
+            return np.nan, np.nan
+        return float(numeric.mean()), float(numeric.median())
+
+    def _profile_diagnostic(
+        self,
+        before_profile: pd.DataFrame,
+        after_profile: pd.DataFrame,
+        before_recipe: pd.DataFrame,
+        after_recipe: pd.DataFrame,
+        recipe: AttackRecipe,
+        recipe_applied: bool,
+        profile: str,
+        skip_reason: str,
+    ) -> Dict[str, object]:
+        before_feature = before_recipe[recipe.feature]
+        after_feature = after_recipe[recipe.feature]
+        changed_mask = self._changed_mask(before_feature, after_feature)
+        changed_rows = int(changed_mask.sum())
+        total_rows = len(before_feature)
+        pre_mean, pre_median = self._stable_numeric_stats(before_feature)
+        post_mean, post_median = self._stable_numeric_stats(after_feature)
+
+        before_numeric = pd.to_numeric(before_feature, errors='coerce')
+        after_numeric = pd.to_numeric(after_feature, errors='coerce')
+        valid = before_numeric.notna() & after_numeric.notna()
+        if valid.any():
+            abs_delta = (after_numeric[valid] - before_numeric[valid]).abs()
+            rel_delta = abs_delta / before_numeric[valid].abs().clip(lower=1.0)
+            mean_abs_delta = float(abs_delta.mean())
+            max_abs_delta = float(abs_delta.max())
+            mean_relative_delta = float(rel_delta.mean())
+        else:
+            mean_abs_delta = np.nan
+            max_abs_delta = np.nan
+            mean_relative_delta = np.nan
+
+        relevant_columns = [recipe.feature, *recipe.dependent_recomputations]
+        changed_columns = [
+            column for column in relevant_columns
+            if column in before_profile.columns and column in after_profile.columns
+            and (
+                (
+                    column == recipe.feature and changed_rows > 0
+                ) or (
+                    column != recipe.feature and recipe_applied and
+                    bool(self._changed_mask(before_profile[column], after_profile[column]).any())
+                )
+            )
+        ]
+        return {
+            'profile': profile,
+            'feature': recipe.feature,
+            'cost_tier': recipe.cost_tier,
+            'recipe_applied': recipe_applied,
+            'changed_rows': changed_rows,
+            'changed_fraction': (changed_rows / total_rows) if total_rows else 0.0,
+            'changed_columns': ';'.join(changed_columns),
+            'pre_mean': pre_mean,
+            'post_mean': post_mean,
+            'pre_median': pre_median,
+            'post_median': post_median,
+            'mean_abs_delta': mean_abs_delta,
+            'max_abs_delta': max_abs_delta,
+            'mean_relative_delta': mean_relative_delta,
+            'skip_reason': '' if recipe_applied else skip_reason,
+        }
