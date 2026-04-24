@@ -165,26 +165,41 @@ class RealisticPerturbationEngine:
         self._recompute_derived(frame)
         return AttackResult(frame, True, feature, recipe.cost_tier, feature)
 
-    def apply_profile(self, X: pd.DataFrame, profile: str) -> AttackResult:
+    def apply_profile(self, X: pd.DataFrame, profile: str, collect_diagnostics: bool = False) -> AttackResult:
         frame = self._to_frame(X)
-        before_profile = frame.copy()
         applied = False
         diagnostics = []
-        for recipe in self._recipes.values():
-            if profile not in recipe.profile_membership:
-                continue
+        recipes = [recipe for recipe in self._recipes.values() if profile in recipe.profile_membership]
+        diagnostic_columns = []
+        if collect_diagnostics:
+            diagnostic_columns = sorted({
+                column
+                for recipe in recipes
+                for column in (recipe.feature, *recipe.dependent_recomputations)
+                if column in frame.columns
+            })
+        before_profile = frame[diagnostic_columns].copy() if diagnostic_columns else None
+        for recipe in recipes:
             if recipe.feature not in frame.columns:
                 continue
-            before_recipe = frame.copy()
+            before_feature = frame[recipe.feature].copy() if collect_diagnostics else None
             recipe_applied = recipe.mutation_rule(frame, self)
-            after_recipe = frame.copy()
-            diagnostics.append(
-                (recipe, recipe_applied, '' if recipe_applied else recipe.skip_reason, before_recipe, after_recipe)
-            )
+            if collect_diagnostics:
+                diagnostics.append((
+                    recipe,
+                    recipe_applied,
+                    '' if recipe_applied else recipe.skip_reason,
+                    before_feature,
+                    frame[recipe.feature].copy(),
+                ))
             applied = recipe_applied or applied
         if applied:
             self._recompute_derived(frame)
-        after_profile = frame.copy()
+        if not collect_diagnostics:
+            return AttackResult(
+                frame, applied, None, 'profile', profile, '' if applied else 'no applicable feature recipes'
+            )
+        after_profile = frame[diagnostic_columns].copy()
         return AttackResult(
             frame,
             applied,
@@ -196,14 +211,14 @@ class RealisticPerturbationEngine:
                 self._profile_diagnostic(
                     before_profile,
                     after_profile,
-                    before_recipe,
-                    after_recipe,
+                    before_feature,
+                    after_feature,
                     recipe,
                     recipe_applied,
                     profile,
                     skip_reason,
                 )
-                for recipe, recipe_applied, skip_reason, before_recipe, after_recipe in diagnostics
+                for recipe, recipe_applied, skip_reason, before_feature, after_feature in diagnostics
             ],
         )
 
@@ -277,15 +292,13 @@ class RealisticPerturbationEngine:
         self,
         before_profile: pd.DataFrame,
         after_profile: pd.DataFrame,
-        before_recipe: pd.DataFrame,
-        after_recipe: pd.DataFrame,
+        before_feature: pd.Series,
+        after_feature: pd.Series,
         recipe: AttackRecipe,
         recipe_applied: bool,
         profile: str,
         skip_reason: str,
     ) -> Dict[str, object]:
-        before_feature = before_recipe[recipe.feature]
-        after_feature = after_recipe[recipe.feature]
         changed_mask = self._changed_mask(before_feature, after_feature)
         changed_rows = int(changed_mask.sum())
         total_rows = len(before_feature)

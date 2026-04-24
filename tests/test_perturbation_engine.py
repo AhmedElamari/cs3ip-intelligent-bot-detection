@@ -63,7 +63,7 @@ class PerturbationEngineTest(unittest.TestCase):
         self.assertEqual(result.data.loc[0, 'description_length'], 20)
 
     def test_realistic_mixed_profile_bounds_expensive_nudges_and_recomputes(self):
-        result = self.engine.apply_profile(self.X_eval, 'realistic_mixed')
+        result = self.engine.apply_profile(self.X_eval, 'realistic_mixed', collect_diagnostics=True)
         self.assertTrue(result.applied)
         self.assertEqual(result.data.loc[0, 'account_age_days'], 10)
         self.assertLessEqual(result.data.loc[0, 'followers_count'], 10.5)
@@ -96,7 +96,7 @@ class PerturbationEngineTest(unittest.TestCase):
         self.assertIn('followers_to_friends_ratio', diagnostics['followers_count']['changed_columns'])
 
     def test_cheap_only_profile_diagnostics_exclude_expensive_recipes(self):
-        result = self.engine.apply_profile(self.X_eval, 'cheap_only')
+        result = self.engine.apply_profile(self.X_eval, 'cheap_only', collect_diagnostics=True)
 
         self.assertTrue(result.applied)
         self.assertEqual(
@@ -110,6 +110,12 @@ class PerturbationEngineTest(unittest.TestCase):
                 'has_extended_profile',
             },
         )
+
+    def test_profile_diagnostics_are_opt_in(self):
+        result = self.engine.apply_profile(self.X_eval, 'realistic_mixed')
+
+        self.assertTrue(result.applied)
+        self.assertEqual([], result.diagnostics)
 
     def test_removed_feature_is_skipped_with_reason(self):
         reduced = self.X_eval.drop(columns=['default_profile_image'])

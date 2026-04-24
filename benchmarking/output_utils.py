@@ -61,7 +61,8 @@ def save_robustness_degradation_figure(benchmark: ModelBenchmark, output_dir: Pa
         return
     top = scoreboard["Model"].head(3).tolist()
     want = ("baseline", "cheap_only", "realistic_mixed")
-    scenarios = [s for s in want if s in set(df["scenario"].astype(str))]
+    plot_df = df[df["model"].isin(top)]
+    scenarios = [s for s in want if s in set(plot_df["scenario"].astype(str))]
     models, f1, pr = degradation_matrix(df, top, scenarios)
     if not models or "baseline" not in scenarios:
         return
