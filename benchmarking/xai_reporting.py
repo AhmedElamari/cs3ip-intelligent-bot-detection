@@ -11,9 +11,13 @@ import matplotlib.pyplot as plt
 
 from config import Config
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
-from explainability.poster_shap import export_poster_shap
 
 
+def export_poster_shap(*args, **kwargs):
+    """Lazily import poster SHAP export support only when it is actually used."""
+    from explainability.poster_shap import export_poster_shap as _export_poster_shap
+
+    return _export_poster_shap(*args, **kwargs)
 def run_explainability_analysis(
     benchmark: Any,
     feature_names: list,
