@@ -514,6 +514,43 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("Attacked true-bot recall", text)
             self.assertIn("global context", text.lower())
 
+    def test_degradation_caption_filters_significance_to_plotted_models(self):
+        cap = _poster_figures().degradation_caption(
+            ["m_a", "m_b"],
+            ("baseline", "cheap_only"),
+            np.array([[0.9, 0.8], [0.88, 0.82]]),
+            np.array([[0.7, 0.6], [0.69, 0.64]]),
+            [
+                {"metric": "f1", "model_a": "hidden_a", "model_b": "hidden_b", "bootstrap_p_corrected": 1e-9},
+                {"metric": "f1", "model_a": "m_a", "model_b": "m_b", "bootstrap_p_corrected": 0.04},
+            ],
+        )
+
+        self.assertIn("m_a vs m_b", cap)
+        self.assertNotIn("hidden_a", cap)
+
+    def test_degradation_caption_describes_only_plotted_scenarios(self):
+        cap = _poster_figures().degradation_caption(
+            ["m_a"],
+            ("baseline", "cheap_only"),
+            np.array([[0.9, 0.82]]),
+            np.array([[0.7, 0.61]]),
+            [],
+        )
+
+        self.assertIn("Baseline (clean)", cap)
+        self.assertIn("Cheap attacks", cap)
+        self.assertNotIn("realistic mixed", cap.lower())
+
+    def test_degradation_caption_handles_missing_attack_targeted_deltas(self):
+        cap = self._caption_case(
+            attacked_recall=(0.8, np.nan),
+            f1=(0.7, 0.65),
+            pr=(0.7, 0.65),
+        )
+
+        self.assertIn("unavailable", cap.lower())
+
     def test_degradation_caption_mentions_attack_targeted_primary_metric(self):
         cap = self._caption_case()
         self.assertIn("top-1 model", cap)
@@ -725,6 +762,34 @@ class OutputUtilsTest(unittest.TestCase):
         with poster_style():
             _ = plt.rcParams["font.size"]
         self.assertEqual(float(plt.rcParams["font.size"]), before)
+
+    def test_robustness_degradation_figure_uses_top_model_scenarios_only(self):
+        try:
+            import matplotlib  # noqa: F401
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        output_utils = _output_utils()
+        bench = _make_three_model_benchmark()
+        bench.robustness_degradation = pd.DataFrame(
+            _degradation_rows(
+                ("m_a", "m_b", "m_c"),
+                (("baseline", 0.9), ("cheap_only", 0.84)),
+            )
+            + _degradation_rows(
+                ("lower_ranked",),
+                (("baseline", 0.7), ("cheap_only", 0.65), ("realistic_mixed", 0.6)),
+            )
+        )
+        bench.robustness_summary = pd.DataFrame(_robustness_summary_rows(("m_a", "m_b", "m_c")))
+
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            output_utils.save_robustness_degradation_figure(bench, out)
+            cap = (out / "robustness_profile_degradation_caption.md").read_text(encoding="utf-8")
+
+        self.assertIn("Cheap attacks", cap)
+        self.assertNotIn("Mixed realistic attacks", cap)
 
 if __name__ == "__main__":
     unittest.main()

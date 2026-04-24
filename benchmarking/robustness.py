@@ -145,7 +145,7 @@ class RobustnessAnalyzer:
     def _profile_diagnostics_frame(self, attacked_base: pd.DataFrame) -> pd.DataFrame:
         rows: List[Dict[str, Any]] = []
         for profile in self.profiles:
-            result = self.engine.apply_profile(attacked_base, profile)
+            result = self.engine.apply_profile(attacked_base, profile, collect_diagnostics=True)
             rows.extend(result.diagnostics)
         return pd.DataFrame(rows)
 

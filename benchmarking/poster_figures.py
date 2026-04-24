@@ -276,11 +276,14 @@ def _pr_cell(value: float) -> str:
 
 def _attack_targeted_summary_sentence(attacked_recall: np.ndarray, scenarios: Sequence[str]) -> str:
     deltas = _attack_deltas(attacked_recall, scenarios)
-    if deltas.size == 0:
+    if deltas.size == 0 or not np.isfinite(deltas).any():
         return "Attacked true-bot recall is unavailable for the selected scenarios."
     bi = scenarios.index("baseline")
     attack_scenarios = [scenario for idx, scenario in enumerate(scenarios) if idx != bi]
-    mean_deltas = np.nanmean(deltas, axis=0)
+    mean_deltas = np.array([
+        np.nanmean(column) if np.isfinite(column).any() else np.nan
+        for column in deltas.T
+    ])
     worst_idx = int(np.nanargmin(mean_deltas))
     worst_scenario = attack_scenarios[worst_idx]
     worst_delta = float(mean_deltas[worst_idx])
@@ -305,6 +308,7 @@ def degradation_caption(
         "the highest-ranked model" if count == 1 else f"the {count} highest-ranked models"
     ) if count else "the selected models"
     scenario_labels = {scenario: SCENARIO_LABELS.get(scenario, scenario) for scenario in scenarios}
+    scenario_text = ", ".join(scenario_labels.values())
     takeaway, summary = _degradation_description(f1, scenarios)
     pr_lines = "\n".join(
         f"- **{MODEL_LABELS.get(model, pretty_model(model))}** - "
@@ -315,9 +319,9 @@ def degradation_caption(
     if attacked_recall is None:
         body = (
             f"**Figure H1. {takeaway} ({model_phrase}, TwiBot-20 test).**\n\n"
-            f"Grouped bars show Macro-F1 for {ranked_phrase} on the baseline (clean) test set, under "
-            "cost-only cheap attacks, and under the realistic mixed profile. Attacks are applied only to "
-            "true-bot rows. Numeric labels show point Macro-F1; Change values above attack bars show the "
+            f"Grouped bars show Macro-F1 for {ranked_phrase} across {scenario_text}. Attacks are applied "
+            "only to true-bot rows for non-baseline scenarios. Numeric labels show point Macro-F1; "
+            "Change values above attack bars show the "
             "difference relative to that model's clean baseline. "
             + summary
             + "\n\n**PR-AUC by scenario:**\n\n"
@@ -338,8 +342,11 @@ def degradation_caption(
             + pr_lines
         )
     best_row, best_p = None, float("inf")
+    plotted_models = {str(model) for model in models}
     for row in pairwise or []:
         if str(row.get("metric", "")) != "f1":
+            continue
+        if {str(row.get("model_a")), str(row.get("model_b"))} - plotted_models:
             continue
         try:
             p_value = float(row.get("bootstrap_p_corrected", float("nan")))

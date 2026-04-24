@@ -410,7 +410,7 @@ class RobustnessAnalysisTest(unittest.TestCase):
         config.set('robustness.profiles', ['cheap_only'])
         analyzer = RobustnessAnalyzer(benchmark, ['score'], config)
 
-        def _mutated_profile(frame, profile):
+        def _mutated_profile(frame, profile, collect_diagnostics=False):
             mutated = frame.copy()
             mutated.iloc[:2, mutated.columns.get_loc('score')] = 0.0
             diagnostics = [{
@@ -430,7 +430,14 @@ class RobustnessAnalysisTest(unittest.TestCase):
                 'mean_relative_delta': 0.02,
                 'skip_reason': '',
             }]
-            return AttackResult(mutated, True, None, 'profile', profile, diagnostics=diagnostics)
+            return AttackResult(
+                mutated,
+                True,
+                None,
+                'profile',
+                profile,
+                diagnostics=diagnostics if collect_diagnostics else [],
+            )
 
         with mock.patch.object(analyzer.engine, 'apply_profile', side_effect=_mutated_profile):
             results = analyzer.run()
