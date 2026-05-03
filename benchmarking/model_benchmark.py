@@ -19,7 +19,7 @@ from benchmarking.hpo.input_prep import build_model_inputs
 
 DEFAULT_METRICS = {
     "comparison": ["accuracy", "precision", "recall", "f1", "roc_auc", "mcc"],
-    "statistics": ["f1", "roc_auc", "pr_auc", "mcc", "balanced_accuracy"],
+    "statistics": ["f1", "f1_macro", "pr_auc", "mcc", "balanced_accuracy", "roc_auc"],
 }
 
 MODEL_DISPLAY_NAMES = {
@@ -61,8 +61,10 @@ class ModelBenchmark:
         self.training_times: Dict[str, float] = {}
         self.predictions: Dict[str, np.ndarray] = {}
         self.probabilities: Dict[str, np.ndarray] = {}
+        self.validation_probabilities: Dict[str, np.ndarray] = {}
         self.y_val: Optional[np.ndarray] = None
         self.y_test: Optional[np.ndarray] = None
+        self.test_metadata: Optional[pd.DataFrame] = None
         self.confidence_intervals: Dict[str, Dict[str, Any]] = {}
         self.pairwise_significance: List[Dict[str, Any]] = []
         self.base_train_inputs: Optional[Union[np.ndarray, pd.DataFrame]] = None
@@ -73,11 +75,15 @@ class ModelBenchmark:
         self.robustness_summary: Optional[pd.DataFrame] = None
         self.robustness_degradation: Optional[pd.DataFrame] = None
         self.feature_attack_results: Optional[pd.DataFrame] = None
+        self.robustness_fidelity: Optional[Dict[str, Any]] = None
         self.hpo_audit_by_model: Dict[str, Dict[str, Any]] = {}
 
     def add_model(self, name: str, model: Any) -> "ModelBenchmark":
         self.models[name] = model
         return self
+
+    def set_test_metadata(self, metadata: Optional[pd.DataFrame]) -> None:
+        self.test_metadata = metadata.copy() if metadata is not None else None
 
     def run_benchmark(
         self,
@@ -157,6 +163,7 @@ class ModelBenchmark:
             try:
                 y_val_proba = model.predict_proba(X_val_model)
                 y_test_proba = model.predict_proba(X_test_model)
+                self.validation_probabilities[name] = y_val_proba
                 self.probabilities[name] = y_test_proba
             except (NotImplementedError, AttributeError):
                 y_val_proba = None

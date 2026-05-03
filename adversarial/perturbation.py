@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -61,6 +61,7 @@ class RealisticPerturbationEngine:
         self._human_frame = self._train_frame.loc[self._y_train == 0]
         self._human_stats = self._build_human_stats()
         self._recipes = self._build_recipes()
+        self._static_recipe_keys = frozenset(self._recipes.keys())
 
     def _to_frame(self, X: pd.DataFrame) -> pd.DataFrame:
         if isinstance(X, pd.DataFrame):
@@ -149,8 +150,94 @@ class RealisticPerturbationEngine:
             ),
         }
 
-    def available_single_feature_attacks(self) -> List[str]:
-        return list(self._recipes.keys())
+    def available_single_feature_attacks(self, builtin_only: bool = True) -> List[str]:
+        keys = sorted(self._recipes)
+        if builtin_only:
+            return [key for key in keys if key in self._static_recipe_keys]
+        return keys
+
+    def register_dynamic_recipe(self, feature: str) -> bool:
+        """Add a single-feature probe that masks toward human-train statistics (not part of profiles)."""
+        if feature in self._recipes:
+            return True
+        if feature not in self._train_frame.columns:
+            return False
+        kind = self._infer_feature_kind(feature)
+        if kind == 'binary':
+            self._recipes[feature] = self._build_dynamic_binary_recipe(feature)
+        else:
+            self._recipes[feature] = self._build_dynamic_numeric_recipe(feature)
+        return True
+
+    def _infer_feature_kind(self, feature: str) -> str:
+        series = pd.to_numeric(self._train_frame[feature], errors='coerce').dropna()
+        if series.empty:
+            return 'numeric'
+        uniq = np.unique(series.to_numpy())
+        if len(uniq) <= 2 and np.all(np.isin(uniq, (0.0, 1.0))):
+            return 'binary'
+        return 'numeric'
+
+    def _human_feature_series(self, feature: str) -> pd.Series:
+        series = self._human_frame.get(feature)
+        return series if series is not None else self._train_frame[feature]
+
+    def _human_binary_majority(self, feature: str) -> Optional[int]:
+        vals = self._human_feature_series(feature).dropna()
+        if vals.empty:
+            return None
+        mode = vals.mode()
+        if len(mode):
+            return int(round(float(mode.iloc[0])))
+        return int(round(float(vals.median())))
+
+    def _human_numeric_median_for_feature(self, feature: str) -> Optional[float]:
+        numeric = pd.to_numeric(
+            self._human_feature_series(feature),
+            errors='coerce',
+        ).dropna()
+        if numeric.empty:
+            return None
+        return float(numeric.median())
+
+    def _build_dynamic_binary_recipe(self, feature: str) -> AttackRecipe:
+        majority = self._human_binary_majority(feature)
+
+        def mutation_rule(frame: pd.DataFrame, engine: RealisticPerturbationEngine) -> bool:
+            if majority is None:
+                return False
+            return engine._set_feature_constant(frame, feature, int(majority))
+
+        return AttackRecipe(
+            feature=feature,
+            cost_tier='generic_mask',
+            profile_membership=(),
+            mutation_rule=mutation_rule,
+            skip_reason='binary majority unavailable',
+        )
+
+    def _build_dynamic_numeric_recipe(self, feature: str) -> AttackRecipe:
+        median = self._human_numeric_median_for_feature(feature)
+
+        def mutation_rule(frame: pd.DataFrame, engine: RealisticPerturbationEngine) -> bool:
+            if median is None:
+                return False
+            return engine._set_feature_constant(frame, feature, float(max(0.0, median)))
+
+        return AttackRecipe(
+            feature=feature,
+            cost_tier='generic_mask',
+            profile_membership=(),
+            mutation_rule=mutation_rule,
+            skip_reason='numeric human median unavailable',
+        )
+
+    def _set_feature_constant(self, frame: pd.DataFrame, feature: str, value: float) -> bool:
+        if feature not in frame.columns:
+            return False
+        before = frame[feature].copy()
+        frame[feature] = value
+        return not before.equals(frame[feature])
 
     def apply_single_feature_attack(self, X: pd.DataFrame, feature: str) -> AttackResult:
         recipe = self._recipes.get(feature)

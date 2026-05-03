@@ -13,6 +13,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
+- Optional validation-selected threshold analysis for precision-recall operating-point audits
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
 - Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop on true bots, full-test-set Macro-F1 / PR-AUC degradation per profile, and dissertation figures (`robustness_profile_degradation.png`, feature vulnerability table/chart)
 
@@ -106,6 +107,7 @@ Expected output (filesystem):
 - `results/hpo_cache/<model>/<signature>.json` — persisted `HPOResultV1` for reuse when the run signature matches
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
+- `results/benchmark_YYYYMMDD_HHMMSS/threshold_analysis.csv` / `.md` — optional, when `--threshold-analysis` is passed; validation-selected threshold policies applied once to the held-out test split
 
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level attack-targeted robustness metrics on perturbed true bots, including attacked-bot recall deltas, flip rates, and confidence shifts
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature single-attack metrics
@@ -114,7 +116,10 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_profile_degradation.png` / `.pdf` / `_caption.md` — poster-formatted robustness figure for the top-3 scoreboard models; attacked true-bot recall is the primary signal and full-test Macro-F1 is retained as conservative global context because only bot rows are perturbed
 - `results/benchmark_YYYYMMDD_HHMMSS/top_feature_vulnerabilities.csv` — top flip-rate features for the best model (single-feature attacks)
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_flip_rates_best_model.png` / `.pdf` / `_caption.md` — poster-formatted horizontal bars coloured by attack cost tier; top-8 profile features by flip-rate with % labels; caption frames attack surface
-- `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` — machine-readable robustness summary
+- `results/benchmark_YYYYMMDD_HHMMSS/robustness_report.json` — machine-readable robustness summary, including `overview.fidelity` (cumulative SHAP-ablation drops and `fidelity_passed`)
+- `results/benchmark_YYYYMMDD_HHMMSS/feature_resilience.csv` / `feature_resilience.md` — **Feature Resilience Score (FRS)** per evaluated feature for the selected model (default: `explainability.poster.model`, usually XGBoost): `FRS = importance_norm × stability × (1 − flip_rate)`, where `importance_norm` is min-max scaled mean |SHAP| over the SHAP top-K ∪ built-in attack features, `stability` is Spearman correlation between baseline and post-attack global SHAP ranks (clipped to [0, 1]), and `flip_rate` is the existing bot-only single-attack flip rate
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_rank_stability.csv` — per-feature Spearman ρ and clipped stability for SHAP ranking under each single-feature mutation
+- `results/benchmark_YYYYMMDD_HHMMSS/shap_cumulative_ablation.csv` — Macro-F1 and PR-AUC on the full test set after masking the top-1/3/5/10 SHAP features (by mean |SHAP|) to training-set medians / binary majorities; use positive `macro_f1_drop` and `pr_auc_drop` before claiming explanation fidelity
 
 ### Single Model Pipeline
 ```bash
@@ -145,12 +150,19 @@ Options:
 - `--models`: specify models to run (e.g. `logistic_regression random_forest xgboost tabnet`)
 - `--smote` / `--scale`: override preprocessing settings
 - `--no-tune` / `--retune` / `--hpo-trials`: same semantics as `main.py` (per-model HPO before training)
+- `--threshold-analysis`: write a precision-recall threshold audit without changing benchmark rankings
+- `--threshold-precision-floor FLOAT`: validation precision floor used by the threshold audit (default `0.80`)
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
+- `--frs-model`: model name for FRS / SHAP stability / cumulative ablation (default: poster model or `xgboost`)
+- `--frs-shap-top-k`: size of the SHAP top-K union used for dynamic single-feature probes
+- `--frs-ablation-top-ks`: list of cumulative ablation depths (default `1 3 5 10`)
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
 **Metric note:** HPO maximises **validation F1** (`val_f1`). The printed `[BEST]` benchmark line still ranks models by **test F1** (existing `get_best_model('f1')` default).
+
+**Threshold note:** `--threshold-analysis` does not retrain models and does not change the headline benchmark ranking. It compares the current `model.predict()` operating point with validation-selected probability thresholds, then reports those thresholds on the held-out test split to diagnose precision-recall trade-offs.
 
 ### Hyperparameter search spaces (v1)
 

@@ -362,6 +362,138 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn(r"\begin{tabular}{@{}rlrrrrrrrrr@{}}", tex_text)
             self.assertNotIn(r"\begin{tabular}{@rl", tex_text)
 
+    def test_save_final_outputs_skips_threshold_analysis_by_default(self):
+        save_final_outputs = _output_utils().save_final_outputs
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            config = Config()
+            output_dir = Path(tmp)
+            benchmark = _make_three_model_benchmark()
+            with mock.patch(
+                "benchmarking.run_metadata._git_metadata",
+                return_value={"commit": "abc123", "branch": "main", "dirty": False},
+            ), mock.patch(
+                "benchmarking.run_metadata._dataset_metadata",
+                return_value={"root": str(output_dir), "combined_sha256": "dataset-hash", "files": {}},
+            ), mock.patch(
+                "benchmarking.run_metadata._package_versions",
+                return_value={"numpy": "1.0.0"},
+            ):
+                save_final_outputs(
+                    benchmark,
+                    output_dir,
+                    config,
+                    self._build_run_context(output_dir),
+                )
+
+            self.assertFalse((output_dir / "threshold_analysis.csv").exists())
+            self.assertFalse((output_dir / "threshold_analysis.md").exists())
+
+    def test_save_final_outputs_writes_threshold_analysis_when_enabled(self):
+        save_final_outputs = _output_utils().save_final_outputs
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            config = Config()
+            output_dir = Path(tmp)
+            benchmark = _make_three_model_benchmark()
+            benchmark.y_val = benchmark.y_test.copy()
+            benchmark.validation_probabilities = {
+                name: proba.copy()
+                for name, proba in benchmark.probabilities.items()
+            }
+            with mock.patch(
+                "benchmarking.run_metadata._git_metadata",
+                return_value={"commit": "abc123", "branch": "main", "dirty": False},
+            ), mock.patch(
+                "benchmarking.run_metadata._dataset_metadata",
+                return_value={"root": str(output_dir), "combined_sha256": "dataset-hash", "files": {}},
+            ), mock.patch(
+                "benchmarking.run_metadata._package_versions",
+                return_value={"numpy": "1.0.0"},
+            ):
+                save_final_outputs(
+                    benchmark,
+                    output_dir,
+                    config,
+                    self._build_run_context(output_dir),
+                    threshold_analysis_enabled=True,
+                    threshold_precision_floor=0.8,
+                )
+
+            csv_text = (output_dir / "threshold_analysis.csv").read_text(encoding="utf-8")
+            md_text = (output_dir / "threshold_analysis.md").read_text(encoding="utf-8")
+            self.assertIn("precision_floor_0.80", csv_text)
+            self.assertIn("validation-selected threshold", md_text)
+
+    def test_save_final_outputs_writes_concept_drift_artifacts_when_enabled(self):
+        try:
+            import matplotlib  # noqa: F401
+        except ImportError:
+            self.skipTest("matplotlib not installed")
+        save_final_outputs = _output_utils().save_final_outputs
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            config = Config()
+            output_dir = Path(tmp)
+            main_b = _make_three_model_benchmark()
+            drift_b = _make_three_model_benchmark()
+            for res in drift_b.results.values():
+                tm = dict(res["test_metrics"])
+                for k in ("f1_macro", "roc_auc", "pr_auc"):
+                    if k in tm and tm[k] is not None:
+                        tm[k] = float(tm[k]) - 0.05
+                res["test_metrics"] = tm
+            with mock.patch(
+                "benchmarking.run_metadata._git_metadata",
+                return_value={"commit": "abc123", "branch": "main", "dirty": False},
+            ), mock.patch(
+                "benchmarking.run_metadata._dataset_metadata",
+                return_value={"root": str(output_dir), "combined_sha256": "dataset-hash", "files": {}},
+            ), mock.patch(
+                "benchmarking.run_metadata._package_versions",
+                return_value={"numpy": "1.0.0"},
+            ):
+                save_final_outputs(
+                    main_b,
+                    output_dir,
+                    config,
+                    self._build_run_context(output_dir),
+                    drift_benchmark=drift_b,
+                    drift_protocol_note="Protocol line for test.",
+                )
+
+            self.assertTrue((output_dir / "time_stratified_scoreboard.csv").exists())
+            md = (output_dir / "time_stratified_scoreboard.md").read_text(encoding="utf-8")
+            self.assertIn("Protocol line for test.", md)
+            self.assertTrue((output_dir / "concept_drift_delta.csv").exists())
+            delta_md = (output_dir / "concept_drift_delta.md").read_text(encoding="utf-8")
+            self.assertIn("Δ", delta_md)
+
+    def test_save_dissertation_statistical_summary_writes_ci_tables(self):
+        save_dissertation_statistical_summary = _output_utils().save_dissertation_statistical_summary
+        with TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            benchmark = _make_three_model_benchmark()
+            benchmark.confidence_intervals = {
+                "m_a": {
+                    "f1_macro": {"lower": 0.90, "point": 0.92, "upper": 0.94},
+                    "pr_auc": {"lower": 0.75, "point": 0.79, "upper": 0.82},
+                },
+                "m_b": {
+                    "f1_macro": {"lower": 0.85, "point": 0.88, "upper": 0.90},
+                    "pr_auc": {"lower": 0.76, "point": 0.78, "upper": 0.81},
+                },
+            }
+
+            save_dissertation_statistical_summary(benchmark, output_dir)
+
+            csv_path = output_dir / "dissertation_statistical_summary.csv"
+            md_path = output_dir / "dissertation_statistical_summary.md"
+            self.assertTrue(csv_path.exists())
+            self.assertTrue(md_path.exists())
+            csv_text = csv_path.read_text(encoding="utf-8")
+            md_text = md_path.read_text(encoding="utf-8")
+            self.assertIn("F1-Macro Point", csv_text)
+            self.assertIn("PR-AUC CI Lower", csv_text)
+            self.assertIn("**0.920 [0.900, 0.940]**", md_text)
+
     def test_save_final_outputs_writes_pr_and_cm_figures(self):
         try:
             import matplotlib  # noqa: F401
@@ -512,7 +644,64 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("PR-AUC", text)
             self.assertIn("Macro-F1", text)
             self.assertIn("Attacked true-bot recall", text)
-            self.assertIn("global context", text.lower())
+            self.assertIn("TwiBot-20 held-out test split", text)
+            self.assertNotIn("primary evidence", text.lower())
+            self.assertNotIn("primary robustness signal", text.lower())
+
+    def test_robustness_degradation_writes_companion_delta_table(self):
+        try:
+            import matplotlib  # noqa: F401
+            import pandas as pd
+        except ImportError:
+            self.skipTest("matplotlib/pandas not installed")
+        save_robustness_degradation_figure = _output_utils().save_robustness_degradation_figure
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp:
+            out = Path(tmp)
+            bench = _with_robustness_data(
+                _make_three_model_benchmark(),
+                ("m_a", "m_b", "m_c"),
+                (("baseline", 0.90), ("cheap_only", 0.85), ("realistic_mixed", 0.81)),
+            )
+            save_robustness_degradation_figure(bench, out)
+
+            csv_path = out / "robustness_profile_degradation_table.csv"
+            md_path = out / "robustness_profile_degradation_table.md"
+            self.assertTrue(csv_path.exists())
+            self.assertTrue(md_path.exists())
+            table = pd.read_csv(csv_path)
+            self.assertEqual(len(table), 6)
+            self.assertListEqual(
+                list(table.columns),
+                [
+                    "Model",
+                    "Attack Profile",
+                    "Attacked True Bots",
+                    "Baseline Recall",
+                    "Attacked Recall",
+                    "Recall Delta",
+                    "Recall Delta %",
+                    "Baseline Macro-F1",
+                    "Attacked Macro-F1",
+                    "Macro-F1 Delta",
+                    "Macro-F1 Delta %",
+                    "Baseline PR-AUC",
+                    "Attacked PR-AUC",
+                    "PR-AUC Delta",
+                    "PR-AUC Delta %",
+                    "Flip Rate",
+                    "Mean Confidence Drop",
+                    "Mean Non-Flip Confidence Drop",
+                ],
+            )
+            self.assertIn("Cheap attacks", set(table["Attack Profile"]))
+            self.assertIn("Mixed realistic attacks", set(table["Attack Profile"]))
+            first = table[table["Attack Profile"].eq("Cheap attacks")].iloc[0]
+            self.assertAlmostEqual(float(first["Baseline Macro-F1"]), 0.90)
+            self.assertAlmostEqual(float(first["Attacked Macro-F1"]), 0.85)
+            self.assertAlmostEqual(float(first["Macro-F1 Delta"]), -0.05)
+            self.assertAlmostEqual(float(first["Macro-F1 Delta %"]), -5.5556)
+            self.assertAlmostEqual(float(first["Mean Confidence Drop"]), 0.0711)
+            self.assertIn("Exact robustness deltas", md_path.read_text(encoding="utf-8"))
 
     def test_degradation_caption_filters_significance_to_plotted_models(self):
         cap = _poster_figures().degradation_caption(
@@ -556,7 +745,9 @@ class OutputUtilsTest(unittest.TestCase):
         self.assertIn("top-1 model", cap)
         self.assertNotIn("top-3 models", cap)
         self._assert_attack_targeted_caption(cap)
-        self.assertIn("global context", cap.lower())
+        self.assertIn("TwiBot-20 held-out test split", cap)
+        self.assertNotIn("primary evidence", cap.lower())
+        self.assertNotIn("primary robustness signal", cap.lower())
         self.assertIn("delta", cap.lower())
 
     def test_degradation_caption_wording_follows_metric_shape(self):
@@ -643,6 +834,9 @@ class OutputUtilsTest(unittest.TestCase):
         self.assertEqual(len(fig.axes), 2)
         self.assertIn("Attacked true-bot recall", fig.axes[0].get_title())
         self.assertIn("Full-test Macro-F1", fig.axes[1].get_title())
+        self.assertNotIn("primary evidence", fig.axes[0].get_title().lower())
+        self.assertEqual(fig.axes[0].get_xlabel(), "Model")
+        self.assertEqual(fig.axes[1].get_xlabel(), "Model")
         plt.close(fig)
 
     def test_plot_best_confusion_matrix_uses_takeaway_title_and_pretty_model_name(self):

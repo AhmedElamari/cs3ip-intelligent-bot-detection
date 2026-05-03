@@ -136,6 +136,9 @@ class RobustnessAnalysisTest(unittest.TestCase):
             results = run_robustness_analysis(benchmark, feature_names, config, output_dir)
             self.assertTrue((output_dir / 'robustness_summary.csv').exists())
             self.assertTrue((output_dir / 'robustness_degradation.csv').exists())
+            self.assertTrue((output_dir / 'feature_resilience.csv').exists())
+            self.assertTrue((output_dir / 'shap_rank_stability.csv').exists())
+            self.assertTrue((output_dir / 'shap_cumulative_ablation.csv').exists())
         self.assertIn('summary', results)
         self.assertIn('feature_attacks', results)
         self.assertIn('degradation', results)
@@ -158,6 +161,7 @@ class RobustnessAnalysisTest(unittest.TestCase):
         for column in (
             'model', 'feature', 'cost_tier', 'baseline_detected_bots',
             'confidence_drop_mean',
+            'frs',
         ):
             self.assertIn(column, feature_attacks.columns)
         for column in ('model', 'scenario', 'macro_f1', 'pr_auc'):
@@ -221,6 +225,10 @@ class RobustnessAnalysisTest(unittest.TestCase):
         self.assertEqual(['logistic_regression'], report['overview']['models'])
         self.assertIn('degradation', report['artifacts'])
         self.assertIn('profile_diagnostics', report['artifacts'])
+        self.assertIn('feature_resilience', report['artifacts'])
+        self.assertIn('shap_rank_stability', report['artifacts'])
+        self.assertIn('shap_cumulative_ablation', report['artifacts'])
+        self.assertIn('fidelity', report['overview'])
 
     def test_save_outputs_sorts_frames_and_pretty_prints_json(self):
         from benchmarking.robustness import RobustnessAnalyzer
@@ -328,6 +336,10 @@ class RobustnessAnalysisTest(unittest.TestCase):
                 'robustness_degradation.csv',
                 'profile_diagnostics.csv',
                 'robustness_report.json',
+                'feature_resilience.csv',
+                'shap_rank_stability.csv',
+                'shap_cumulative_ablation.csv',
+                'feature_resilience.md',
             ):
                 self.assertEqual(
                     (Path(tmp_a) / filename).read_text(encoding='utf-8'),
