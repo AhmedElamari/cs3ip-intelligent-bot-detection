@@ -7,7 +7,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from config import Config
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
@@ -18,6 +17,8 @@ def export_poster_shap(*args, **kwargs):
     from explainability.poster_shap import export_poster_shap as _export_poster_shap
 
     return _export_poster_shap(*args, **kwargs)
+
+
 def run_explainability_analysis(
     benchmark: Any,
     feature_names: list,
@@ -60,6 +61,8 @@ def run_explainability_analysis(
 
             if config.get('output.save_plots'):
                 try:
+                    import matplotlib.pyplot as plt
+
                     fig = analyzer.plot_importance_comparison(comparison_df)
                     fig.savefig(output_dir / 'feature_importance_comparison.png', dpi=150, bbox_inches='tight')
                     plt.close(fig)
@@ -76,7 +79,8 @@ def run_explainability_analysis(
         )
 
         # SHAP for tree-based models + TabNet (uses model-agnostic KernelExplainer path).
-        target_models = ['random_forest', 'xgboost', 'tabnet']
+        poster_model = str(config.get('explainability.poster.model', 'xgboost'))
+        target_models = list(dict.fromkeys(['random_forest', 'xgboost', 'tabnet', poster_model]))
 
         for model_name in target_models:
             if model_name not in benchmark.results:
@@ -149,6 +153,8 @@ def run_explainability_analysis(
 
                 if config.get('output.save_plots'):
                     try:
+                        import matplotlib.pyplot as plt
+
                         n_shap = min(50, len(X_test_m))
                         X_shap = X_test_m[:n_shap]
                         fig = shap_explainer.plot_summary(X_shap, max_display=10)

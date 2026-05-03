@@ -460,7 +460,7 @@ def degradation_caption(
     best_row, best_p = None, float("inf")
     plotted_models = {str(model) for model in models}
     for row in pairwise or []:
-        if str(row.get("metric", "")) != "f1":
+        if str(row.get("metric", "")) != "f1_macro":
             continue
         if {str(row.get("model_a")), str(row.get("model_b"))} - plotted_models:
             continue
@@ -472,7 +472,7 @@ def degradation_caption(
             best_p, best_row = p_value, row
     if best_row is not None and math.isfinite(best_p):
         body += (
-            f"\n\nPairwise clean-baseline significance (paired-bootstrap Delta F1, Holm-Bonferroni corrected): "
+            f"\n\nPairwise clean-baseline significance (paired-bootstrap Delta F1-macro, Holm-Bonferroni corrected): "
             f"{best_row.get('model_a')} vs {best_row.get('model_b')}, p={best_p:.2g}. "
             "Full pairwise table in `pairwise_significance.csv`."
         )

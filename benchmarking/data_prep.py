@@ -114,7 +114,8 @@ def prepare_data(
             val_size=config.get('val_size', 0.2),
             test_size=config.get('test_size', 0.1),
             time_col='account_creation_date',
-            random_state=config.get('random_state', 2112)
+            random_state=config.get('random_state', 2112),
+            min_samples_per_split=int(config.get('concept_drift.min_samples_per_split', 1)),
         )
     elif not temporal_protocol:
         reference_date = derive_reference_date(train_df)

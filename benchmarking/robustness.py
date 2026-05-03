@@ -169,7 +169,11 @@ class RobustnessAnalyzer:
             .sort_values(self.feature_names, kind='mergesort')
             .reset_index(drop=True)
         )
-        profile_diagnostics = self._profile_diagnostics_frame(attacked_base)
+        profile_diagnostics = (
+            self._profile_diagnostics_frame(attacked_base)
+            if self.evaluate_bundle_attacks
+            else pd.DataFrame()
+        )
 
         for model_name, result in self.benchmark.results.items():
             model = result['model']
@@ -663,6 +667,8 @@ class RobustnessAnalyzer:
         for key, filename in file_map.items():
             frame = sorted_results.get(key)
             if frame is None:
+                continue
+            if key == "profile_diagnostics" and getattr(frame, "empty", False):
                 continue
             format_frame_for_export(frame).to_csv(output_dir / filename, index=False)
 

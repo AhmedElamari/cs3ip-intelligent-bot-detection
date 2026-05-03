@@ -710,8 +710,8 @@ class OutputUtilsTest(unittest.TestCase):
             np.array([[0.9, 0.8], [0.88, 0.82]]),
             np.array([[0.7, 0.6], [0.69, 0.64]]),
             [
-                {"metric": "f1", "model_a": "hidden_a", "model_b": "hidden_b", "bootstrap_p_corrected": 1e-9},
-                {"metric": "f1", "model_a": "m_a", "model_b": "m_b", "bootstrap_p_corrected": 0.04},
+                {"metric": "f1_macro", "model_a": "hidden_a", "model_b": "hidden_b", "bootstrap_p_corrected": 1e-9},
+                {"metric": "f1_macro", "model_a": "m_a", "model_b": "m_b", "bootstrap_p_corrected": 0.04},
             ],
         )
 
