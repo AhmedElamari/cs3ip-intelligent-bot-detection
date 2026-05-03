@@ -5,6 +5,7 @@ import tempfile
 import unittest
 import warnings
 from pathlib import Path
+from unittest import mock
 
 try:
     import numpy as np
@@ -135,21 +136,47 @@ class RobustnessAnalysisTest(unittest.TestCase):
             results = run_robustness_analysis(benchmark, feature_names, config, output_dir)
             self.assertTrue((output_dir / 'robustness_summary.csv').exists())
             self.assertTrue((output_dir / 'robustness_degradation.csv').exists())
+            self.assertTrue((output_dir / 'feature_resilience.csv').exists())
+            self.assertTrue((output_dir / 'shap_rank_stability.csv').exists())
+            self.assertTrue((output_dir / 'shap_cumulative_ablation.csv').exists())
         self.assertIn('summary', results)
         self.assertIn('feature_attacks', results)
         self.assertIn('degradation', results)
+        self.assertIn('profile_diagnostics', results)
         summary = results['summary']
         feature_attacks = results['feature_attacks']
         degradation = results['degradation']
+        profile_diagnostics = results['profile_diagnostics']
         for column in ('model', 'profile', 'attacked_true_bots', 'baseline_detected_bots', 'flip_rate'):
+            self.assertIn(column, summary.columns)
+        for column in (
+            'attacked_bot_recall_baseline',
+            'attacked_bot_recall',
+            'attacked_bot_recall_delta',
+            'attacked_bot_mean_probability_baseline',
+            'attacked_bot_mean_probability',
+            'attacked_bot_mean_probability_delta',
+        ):
             self.assertIn(column, summary.columns)
         for column in (
             'model', 'feature', 'cost_tier', 'baseline_detected_bots',
             'confidence_drop_mean',
+            'frs',
         ):
             self.assertIn(column, feature_attacks.columns)
         for column in ('model', 'scenario', 'macro_f1', 'pr_auc'):
             self.assertIn(column, degradation.columns)
+        for column in (
+            'profile',
+            'feature',
+            'cost_tier',
+            'recipe_applied',
+            'changed_rows',
+            'changed_columns',
+            'mean_abs_delta',
+            'mean_relative_delta',
+        ):
+            self.assertIn(column, profile_diagnostics.columns)
 
     def test_robustness_degradation_csv_schema(self):
         from benchmarking.robustness import RobustnessAnalyzer
@@ -197,6 +224,11 @@ class RobustnessAnalysisTest(unittest.TestCase):
         self.assertListEqual(list(results['summary'].columns), summary_manifest['columns'])
         self.assertEqual(['logistic_regression'], report['overview']['models'])
         self.assertIn('degradation', report['artifacts'])
+        self.assertIn('profile_diagnostics', report['artifacts'])
+        self.assertIn('feature_resilience', report['artifacts'])
+        self.assertIn('shap_rank_stability', report['artifacts'])
+        self.assertIn('shap_cumulative_ablation', report['artifacts'])
+        self.assertIn('fidelity', report['overview'])
 
     def test_save_outputs_sorts_frames_and_pretty_prints_json(self):
         from benchmarking.robustness import RobustnessAnalyzer
@@ -302,7 +334,12 @@ class RobustnessAnalysisTest(unittest.TestCase):
                 'robustness_summary.csv',
                 'feature_attack_results.csv',
                 'robustness_degradation.csv',
+                'profile_diagnostics.csv',
                 'robustness_report.json',
+                'feature_resilience.csv',
+                'shap_rank_stability.csv',
+                'shap_cumulative_ablation.csv',
+                'feature_resilience.md',
             ):
                 self.assertEqual(
                     (Path(tmp_a) / filename).read_text(encoding='utf-8'),
@@ -351,6 +388,84 @@ class RobustnessAnalysisTest(unittest.TestCase):
             any(issubclass(w.category, FutureWarning) for w in caught),
             [str(w.message) for w in caught],
         )
+
+    def test_attack_targeted_metrics_show_stronger_profile_effect_than_macro_f1(self):
+        from adversarial.perturbation import AttackResult
+        from benchmarking.robustness import RobustnessAnalyzer
+        from config import Config
+
+        class _RuleModel:
+            def predict(self, X):
+                scores = np.asarray(X['score'], dtype=float)
+                return (scores >= 0.5).astype(int)
+
+            def predict_proba(self, X):
+                scores = np.asarray(X['score'], dtype=float)
+                return np.column_stack([1.0 - scores, scores])
+
+        class _Benchmark:
+            def __init__(self):
+                humans = pd.DataFrame({'score': np.zeros(100, dtype=float)})
+                bots = pd.DataFrame({'score': np.ones(100, dtype=float)})
+                self.base_test_inputs = pd.concat([humans, bots], ignore_index=True)
+                self.base_train_inputs = self.base_test_inputs.copy()
+                self.base_y_train = np.concatenate([np.zeros(100, dtype=int), np.ones(100, dtype=int)])
+                self.y_test = self.base_y_train.copy()
+                self.results = {'rule_model': {'model': _RuleModel()}}
+
+            def prepare_eval_inputs(self, model_name, X):
+                return X.copy()
+
+        benchmark = _Benchmark()
+        config = Config()
+        config.set('robustness.enabled', True)
+        config.set('robustness.profiles', ['cheap_only'])
+        analyzer = RobustnessAnalyzer(benchmark, ['score'], config)
+
+        def _mutated_profile(frame, profile, collect_diagnostics=False):
+            mutated = frame.copy()
+            mutated.iloc[:2, mutated.columns.get_loc('score')] = 0.0
+            diagnostics = [{
+                'profile': profile,
+                'feature': 'score',
+                'cost_tier': 'cheap',
+                'recipe_applied': True,
+                'changed_rows': 2,
+                'changed_fraction': 0.02,
+                'changed_columns': 'score',
+                'pre_mean': 1.0,
+                'post_mean': 0.98,
+                'pre_median': 1.0,
+                'post_median': 1.0,
+                'mean_abs_delta': 0.02,
+                'max_abs_delta': 1.0,
+                'mean_relative_delta': 0.02,
+                'skip_reason': '',
+            }]
+            return AttackResult(
+                mutated,
+                True,
+                None,
+                'profile',
+                profile,
+                diagnostics=diagnostics if collect_diagnostics else [],
+            )
+
+        with mock.patch.object(analyzer.engine, 'apply_profile', side_effect=_mutated_profile):
+            results = analyzer.run()
+
+        summary_row = results['summary'].iloc[0]
+        degradation = results['degradation'].set_index('scenario')
+        macro_delta = (
+            float(degradation.loc['cheap_only', 'macro_f1']) -
+            float(degradation.loc['baseline', 'macro_f1'])
+        )
+
+        self.assertAlmostEqual(float(summary_row['attacked_bot_recall_baseline']), 1.0)
+        self.assertAlmostEqual(float(summary_row['attacked_bot_recall']), 0.98)
+        self.assertAlmostEqual(float(summary_row['attacked_bot_recall_delta']), -0.02)
+        self.assertLess(float(summary_row['attacked_bot_recall_delta']), macro_delta)
+        self.assertGreater(macro_delta, -0.02)
 
 
 if __name__ == '__main__':

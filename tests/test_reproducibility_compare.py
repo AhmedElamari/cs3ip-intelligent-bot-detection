@@ -8,21 +8,27 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+_COMPARE_SCRIPT = ROOT / "tasks" / "reproducibility_compare.py"
+
 
 def _load_compare_module():
-    module_path = ROOT / "tasks" / "reproducibility_compare.py"
-    spec = importlib.util.spec_from_file_location("reproducibility_compare", module_path)
+    spec = importlib.util.spec_from_file_location("reproducibility_compare", _COMPARE_SCRIPT)
     module = importlib.util.module_from_spec(spec)
     if spec.loader is None:
-        raise RuntimeError(f"Could not load module spec for {module_path}")
+        raise RuntimeError(f"Could not load module spec for {_COMPARE_SCRIPT}")
     spec.loader.exec_module(module)
     return module
 
 
-REPRO_COMPARE = _load_compare_module()
-
-
+@unittest.skipUnless(
+    _COMPARE_SCRIPT.is_file(),
+    f"Optional helper missing: {_COMPARE_SCRIPT}",
+)
 class ReproducibilityCompareTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._compare = _load_compare_module()
+
     def _write_run_artifacts(
         self,
         directory: Path,
@@ -112,14 +118,14 @@ class ReproducibilityCompareTest(unittest.TestCase):
             training_time_a=1.23,
             training_time_b=9.87,
         )
-        matches, differences = REPRO_COMPARE.compare_runs(run_a, run_b)
+        matches, differences = self._compare.compare_runs(run_a, run_b)
 
         self.assertTrue(matches)
         self.assertEqual([], differences)
 
     def test_compare_runs_reports_real_metric_differences(self):
         run_a, run_b = self._build_run_pair(f1_a=0.9123, f1_b=0.5000)
-        matches, differences = REPRO_COMPARE.compare_runs(run_a, run_b)
+        matches, differences = self._compare.compare_runs(run_a, run_b)
 
         self.assertFalse(matches)
         self.assertTrue(any("model_comparison.csv" in difference or "results.json" in difference for difference in differences))
@@ -128,7 +134,7 @@ class ReproducibilityCompareTest(unittest.TestCase):
         run_a, run_b = self._build_run_pair(f1_a=0.9123, f1_b=0.9123)
         (run_a / "pr_curves_comparison.png").write_bytes(b"plot-a")
         (run_b / "pr_curves_comparison.png").write_bytes(b"plot-b")
-        matches, differences = REPRO_COMPARE.compare_runs(run_a, run_b)
+        matches, differences = self._compare.compare_runs(run_a, run_b)
 
         self.assertTrue(matches)
         self.assertEqual([], differences)

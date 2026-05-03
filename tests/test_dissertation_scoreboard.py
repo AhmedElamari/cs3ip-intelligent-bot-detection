@@ -110,6 +110,11 @@ class DissertationScoreboardTest(unittest.TestCase):
         df = build_scoreboard(b)
         self.assertEqual(to_latex(df), to_latex(df))
 
+    def test_to_markdown_custom_caption(self):
+        b = _Bench({"only": _row(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.1, 0.5, 1.0)})
+        md = to_markdown(build_scoreboard(b), caption="Custom drift caption.")
+        self.assertIn("Custom drift caption.", md.splitlines()[0])
+
     def test_empty_results_dataframe(self):
         df = build_scoreboard(_Bench({}))
         self.assertTrue(df.empty)

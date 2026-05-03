@@ -93,12 +93,13 @@ def _format_time_cell(v: object) -> str:
     return f"{float(v):.2f}"
 
 
-def to_markdown(df: pd.DataFrame) -> str:
+def to_markdown(df: pd.DataFrame, caption: str | None = None) -> str:
     perf = [d for d, _ in METRIC_COLUMNS]
     masks = {c: _best_mask(df[c]) for c in perf}
     header = "| " + " | ".join(df.columns) + " |"
     sep = "| " + " | ".join("---" for _ in df.columns) + " |"
-    lines = [CAPTION, "", header, sep]
+    cap = CAPTION if caption is None else caption
+    lines = [cap, "", header, sep]
     for i in range(len(df)):
         cells = []
         for col in df.columns:

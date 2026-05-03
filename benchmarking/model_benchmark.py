@@ -19,8 +19,22 @@ from benchmarking.hpo.input_prep import build_model_inputs
 
 DEFAULT_METRICS = {
     "comparison": ["accuracy", "precision", "recall", "f1", "roc_auc", "mcc"],
-    "statistics": ["f1", "roc_auc", "pr_auc", "mcc", "balanced_accuracy"],
+    "statistics": ["f1", "f1_macro", "pr_auc", "mcc", "balanced_accuracy", "roc_auc"],
 }
+
+MODEL_DISPLAY_NAMES = {
+    "xgboost": "XGBoost",
+    "random_forest": "Random Forest",
+    "logistic_regression": "Logistic Regression",
+    "decision_tree": "Decision Tree",
+    "naive_bayes": "Naive Bayes",
+    "svm": "SVM",
+    "tabnet": "TabNet",
+}
+
+
+def _display_model_name(name: str) -> str:
+    return MODEL_DISPLAY_NAMES.get(str(name), str(name).replace("_", " ").title())
 
 @dataclass
 class ModelBenchmarkConfig:
@@ -47,8 +61,10 @@ class ModelBenchmark:
         self.training_times: Dict[str, float] = {}
         self.predictions: Dict[str, np.ndarray] = {}
         self.probabilities: Dict[str, np.ndarray] = {}
+        self.validation_probabilities: Dict[str, np.ndarray] = {}
         self.y_val: Optional[np.ndarray] = None
         self.y_test: Optional[np.ndarray] = None
+        self.test_metadata: Optional[pd.DataFrame] = None
         self.confidence_intervals: Dict[str, Dict[str, Any]] = {}
         self.pairwise_significance: List[Dict[str, Any]] = []
         self.base_train_inputs: Optional[Union[np.ndarray, pd.DataFrame]] = None
@@ -59,11 +75,15 @@ class ModelBenchmark:
         self.robustness_summary: Optional[pd.DataFrame] = None
         self.robustness_degradation: Optional[pd.DataFrame] = None
         self.feature_attack_results: Optional[pd.DataFrame] = None
+        self.robustness_fidelity: Optional[Dict[str, Any]] = None
         self.hpo_audit_by_model: Dict[str, Dict[str, Any]] = {}
 
     def add_model(self, name: str, model: Any) -> "ModelBenchmark":
         self.models[name] = model
         return self
+
+    def set_test_metadata(self, metadata: Optional[pd.DataFrame]) -> None:
+        self.test_metadata = metadata.copy() if metadata is not None else None
 
     def run_benchmark(
         self,
@@ -143,6 +163,7 @@ class ModelBenchmark:
             try:
                 y_val_proba = model.predict_proba(X_val_model)
                 y_test_proba = model.predict_proba(X_test_model)
+                self.validation_probabilities[name] = y_val_proba
                 self.probabilities[name] = y_test_proba
             except (NotImplementedError, AttributeError):
                 y_val_proba = None
@@ -538,10 +559,19 @@ class ModelBenchmark:
         cm = self.metrics_calculator.get_confusion_matrix(
             self.y_test, y_pred, normalize=normalize
         )
+        display_name = _display_model_name(best_name)
         fmt = ".2f" if normalize else "d"
-        title_kind = (
-            "Normalized by True Label" if normalize == "true" else "Raw Counts"
-        )
+        if normalize == "true":
+            human_recall = float(cm[0, 0])
+            bot_recall = float(cm[1, 1])
+            if bot_recall >= 0.95 and human_recall < 0.75:
+                title = f"{display_name} catches nearly all bots but over-flags some humans"
+            elif min(human_recall, bot_recall) >= 0.8:
+                title = f"{display_name} separates humans and bots cleanly on the test split"
+            else:
+                title = f"{display_name} shows uneven error trade-offs across the two classes"
+        else:
+            title = f"Test-set prediction counts for {display_name}"
 
         fig, ax = plt.subplots(figsize=figsize)
         sns.heatmap(
@@ -556,7 +586,7 @@ class ModelBenchmark:
         )
         ax.set_xlabel("Predicted label")
         ax.set_ylabel("True label")
-        ax.set_title(f"Confusion Matrix ({title_kind}) — {best_name}")
+        ax.set_title(title)
         plt.tight_layout()
         return fig
 

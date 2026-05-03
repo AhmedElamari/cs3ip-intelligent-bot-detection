@@ -42,7 +42,13 @@ def load_data(data_dir: Path) -> dict:
     return splits
 
 
-def prepare_data(data, config: Config) -> tuple:
+def prepare_data(
+    data,
+    config: Config,
+    return_metadata: bool = False,
+    *,
+    temporal_protocol: bool = False,
+) -> tuple:
     """Prepare data for model training with feature engineering and preprocessing.
 
     Args:
@@ -84,8 +90,16 @@ def prepare_data(data, config: Config) -> tuple:
     val_df = cleaned['val']
     test_df = cleaned['test']
 
-    # Apply time-stratified split if enabled (combats data drift)
-    use_time_split = config.get('time_split')
+    if temporal_protocol:
+        reference_date = derive_reference_date(
+            pd.concat([train_df, val_df, test_df], ignore_index=True)
+        )
+        use_time_split = False
+    elif config.get('time_split'):
+        use_time_split = True
+    else:
+        use_time_split = False
+
     if use_time_split:
         print("\nApplying time-stratified split (chronological ordering)...")
         # Derive reference date from ALL data BEFORE splitting:
@@ -100,9 +114,10 @@ def prepare_data(data, config: Config) -> tuple:
             val_size=config.get('val_size', 0.2),
             test_size=config.get('test_size', 0.1),
             time_col='account_creation_date',
-            random_state=config.get('random_state', 2112)
+            random_state=config.get('random_state', 2112),
+            min_samples_per_split=int(config.get('concept_drift.min_samples_per_split', 1)),
         )
-    else:
+    elif not temporal_protocol:
         reference_date = derive_reference_date(train_df)
     if use_time_split:
         print(f"  Train (oldest):   {len(train_df)} samples")
@@ -156,6 +171,15 @@ def prepare_data(data, config: Config) -> tuple:
     print("\nFinal data shapes (using provided splits):")
 
     # Handle imbalance if configured
+    test_metadata = pd.DataFrame({
+        'user_id': test_df.get(
+            'user_id',
+            pd.Series(['n/a'] * len(test_df), index=test_df.index),
+        ).astype(str).values,
+        'row_index': np.arange(len(test_df)),
+        'label': test_df['label'].astype(int).values,
+    })
+
     if config.get('preprocessing.handle_imbalance'):
         method = config.get('preprocessing.imbalance_method', 'smote')
         print(f"\nApplying {method.upper()} for class balancing...")
@@ -178,4 +202,7 @@ def prepare_data(data, config: Config) -> tuple:
     print(f"  Validation: {X_val.shape}")
     print(f"  Test:       {X_test.shape}")
 
-    return X_train, X_val, X_test, y_train, y_val, y_test, feature_names
+    prepared = (X_train, X_val, X_test, y_train, y_val, y_test, feature_names)
+    if return_metadata:
+        return (*prepared, test_metadata)
+    return prepared

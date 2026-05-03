@@ -27,6 +27,15 @@ class Config:
         'test_size': 0.1,
         'val_size': 0.2,
         'time_split': False,  # Use chronological splitting to combat data drift
+
+        'concept_drift': {
+            'enabled': False,
+            'time_col': 'account_creation_date',
+            'val_size': 0.2,
+            'test_size': 0.1,
+            'min_samples_per_split': 1,
+            'reference_date_policy': 'dataset_observation_anchor',
+        },
         
         'preprocessing': {
             'handle_imbalance': False,
@@ -126,6 +135,11 @@ class Config:
                 'enabled': True,
                 'methods': ['builtin', 'permutation'],
             },
+            'poster': {
+                'enabled': False,
+                'model': 'xgboost',
+                'top_n': 10,
+            },
         },
 
         'robustness': {
@@ -135,6 +149,13 @@ class Config:
             'evaluate_single_feature_attacks': True,
             'evaluate_bundle_attacks': True,
             'expensive_nudge_fraction': 0.05,
+            'frs': {
+                'enabled': True,
+                'model': None,
+                'shap_top_k': 15,
+                'ablation_top_ks': [1, 3, 5, 10],
+                'shap_max_samples': 100,
+            },
         },
         
         'output': {
@@ -362,6 +383,14 @@ test_size: 0.1
 val_size: 0.2
 time_split: false  # Use chronological splitting to combat data drift
 
+concept_drift:
+  enabled: false
+  time_col: account_creation_date
+  val_size: 0.2
+  test_size: 0.1
+  min_samples_per_split: 1
+  reference_date_policy: dataset_observation_anchor
+
 preprocessing:
   handle_imbalance: false
   imbalance_method: smote  # smote or undersample
@@ -448,6 +477,10 @@ explainability:
     methods:
       - builtin
       - permutation
+  poster:
+    enabled: false
+    model: xgboost
+    top_n: 10
 
 robustness:
   enabled: false
@@ -458,6 +491,12 @@ robustness:
   evaluate_single_feature_attacks: true
   evaluate_bundle_attacks: true
   expensive_nudge_fraction: 0.05
+  frs:
+    enabled: true
+    model: null
+    shap_top_k: 15
+    ablation_top_ks: [1, 3, 5, 10]
+    shap_max_samples: 100
 
 output:
   save_models: true

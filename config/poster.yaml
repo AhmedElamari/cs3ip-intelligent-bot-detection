@@ -1,0 +1,8 @@
+# Optional poster SHAP settings. If you pass this as the only `--config` file, it becomes the
+# full run config (defaults are not merged with another YAML). Prefer adding the `explainability.poster`
+# block to your main config, or merge two YAML files yourself before running.
+explainability:
+  poster:
+    enabled: true
+    model: xgboost
+    top_n: 10
