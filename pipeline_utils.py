@@ -40,7 +40,8 @@ def time_stratified_split(
     val_size: float = 0.2,
     test_size: float = 0.1,
     time_col: str = 'account_creation_date',
-    random_state: int = 2112
+    random_state: int = 2112,
+    min_samples_per_split: int = 1,
 ) -> tuple:
     """Split data chronologically, then shuffle within each split.
     
@@ -107,11 +108,13 @@ def time_stratified_split(
     train_count = train_end
     val_count = val_end - train_end
     test_count = n - val_end
-    if min(train_count, val_count, test_count) < 1:
+    need = max(1, int(min_samples_per_split))
+    if min(train_count, val_count, test_count) < need:
         raise ValueError(
-            "Time-stratified split requires at least 1 sample per split; "
-            f"got train={train_count}, val={val_count}, test={test_count} from n={n}. "
-            "Adjust val_size/test_size or provide more data."
+            "Time-stratified split requires at least min_samples_per_split rows in each split; "
+            f"got train={train_count}, val={val_count}, test={test_count} from n={n} "
+            f"(min_samples_per_split={need}). "
+            "Adjust val_size/test_size, increase data, or lower concept_drift.min_samples_per_split."
         )
     
     # Split chronologically: train oldest, val middle, test newest
@@ -147,7 +150,8 @@ def apply_time_split_if_enabled(
     val_size: float = 0.2,
     test_size: float = 0.1,
     time_col: str = 'account_creation_date',
-    random_state: int = 2112
+    random_state: int = 2112,
+    min_samples_per_split: int = 1,
 ) -> tuple:
     """Apply time-stratified split and derive reference date when enabled."""
     from FeatureEngineering import derive_reference_date
@@ -160,7 +164,8 @@ def apply_time_split_if_enabled(
             val_size=val_size,
             test_size=test_size,
             time_col=time_col,
-            random_state=random_state
+            random_state=random_state,
+            min_samples_per_split=min_samples_per_split,
         )
     else:
         reference_date = derive_reference_date(train_df)

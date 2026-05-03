@@ -19,6 +19,7 @@ def build_temporal_split_dict(
     test_size: float,
     time_col: str,
     random_state: int,
+    min_samples_per_split: int = 1,
 ) -> Dict[str, pd.DataFrame]:
     """Combine official splits and re-partition by time (oldest→train, newest→test)."""
     missing = [k for k in ("train", "val", "test") if k not in raw_splits]
@@ -39,6 +40,7 @@ def build_temporal_split_dict(
         test_size=test_size,
         time_col=time_col,
         random_state=random_state,
+        min_samples_per_split=min_samples_per_split,
     )
     return {"train": train_df, "val": val_df, "test": test_df}
 

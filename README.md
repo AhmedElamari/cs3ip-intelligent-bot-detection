@@ -108,6 +108,7 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
 - `results/benchmark_YYYYMMDD_HHMMSS/pairwise_significance.csv` — delta, CI, and p-values for every model pair
 - `results/benchmark_YYYYMMDD_HHMMSS/threshold_analysis.csv` / `.md` — optional, when `--threshold-analysis` is passed; validation-selected threshold policies applied once to the held-out test split
+- `results/benchmark_YYYYMMDD_HHMMSS/poster/shap_summary_<model>_poster.png` / `.pdf` / `_caption.md` — optional, when `explainability.poster.enabled` is true and SHAP runs for `explainability.poster.model` (high-DPI beeswarm; caption lists top drivers by mean |SHAP| for that export)
 
 - `results/benchmark_YYYYMMDD_HHMMSS/robustness_summary.csv` — profile-level attack-targeted robustness metrics on perturbed true bots, including attacked-bot recall deltas, flip rates, and confidence shifts
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_attack_results.csv` — per-feature single-attack metrics
@@ -154,9 +155,7 @@ Options:
 - `--threshold-precision-floor FLOAT`: validation precision floor used by the threshold audit (default `0.80`)
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
-- `--frs-model`: model name for FRS / SHAP stability / cumulative ablation (default: poster model or `xgboost`)
-- `--frs-shap-top-k`: size of the SHAP top-K union used for dynamic single-feature probes
-- `--frs-ablation-top-ks`: list of cumulative ablation depths (default `1 3 5 10`)
+- `--frs-model`, `--frs-shap-top-k`, `--frs-ablation-top-ks`: applied when robustness is enabled (CLI or `robustness.enabled: true` in config); tune FRS / SHAP stability / ablation for that run
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 

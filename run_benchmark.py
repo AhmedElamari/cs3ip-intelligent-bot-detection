@@ -294,6 +294,7 @@ def main():
         config.set('output.save_plots', True)
     if args.robustness_analysis:
         config.set('robustness.enabled', True)
+    if args.robustness_analysis or config.get('robustness.enabled'):
         if args.frs_model is not None:
             config.set('robustness.frs.model', args.frs_model)
         if args.frs_shap_top_k is not None:
@@ -440,6 +441,7 @@ def main():
             test_size=float(drift_cfg.get('concept_drift.test_size', 0.1)),
             time_col=str(drift_cfg.get('concept_drift.time_col', 'account_creation_date')),
             random_state=int(drift_cfg.get('random_state', 2112)),
+            min_samples_per_split=int(drift_cfg.get('concept_drift.min_samples_per_split', 1)),
         )
         drift_protocol_note = format_protocol_note(
             temporal['train'],

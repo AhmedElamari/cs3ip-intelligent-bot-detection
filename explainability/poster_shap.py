@@ -5,8 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Sequence
 
-import matplotlib as mpl
-import matplotlib.pyplot as plt
+import numpy as np
 
 LABEL_MAP = {
     "is_verified": "Verified account", "followers_count": "Followers (count)",
@@ -34,16 +33,50 @@ def _pretty_model_name(model_name: str) -> str:
     return MODEL_LABELS.get(str(model_name), str(model_name).replace("_", " ").title())
 
 
-def _caption(model_name: str, top_n: int) -> str:
+def _mean_abs_shap_per_feature(shap_values: Any) -> np.ndarray:
+    if isinstance(shap_values, list):
+        class_vals = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+        arr = np.asarray(class_vals, dtype=float)
+    elif hasattr(shap_values, "values"):
+        arr = np.asarray(shap_values.values, dtype=float)
+    else:
+        arr = np.asarray(shap_values, dtype=float)
+    if arr.ndim == 3:
+        arr = arr[:, :, 1] if arr.shape[2] > 1 else arr[:, :, 0]
+    if arr.ndim == 1:
+        return np.abs(arr)
+    return np.mean(np.abs(arr), axis=0)
+
+
+def _caption(
+    shap_values: Any,
+    feature_names: Sequence[str],
+    model_name: str,
+    top_n: int,
+    *,
+    n_mention: int = 3,
+) -> str:
+    names = [str(n) for n in feature_names]
+    mag = _mean_abs_shap_per_feature(shap_values)
+    drivers = ""
+    if mag.size == len(names) and mag.size > 0:
+        order = np.argsort(mag)[::-1][: max(1, min(n_mention, int(top_n)))]
+        bits = [
+            LABEL_MAP.get(names[i], names[i])
+            for i in order
+        ]
+        drivers = (
+            " Strongest drivers in this export (mean |SHAP|, highest first): "
+            + ", ".join(bits)
+            + "."
+        )
     return (
-        f"{_pretty_model_name(model_name)} relies on a compact set of interpretable profile signals on the "
-        f"evaluation test split. Global SHAP beeswarm (top {top_n} features by mean |SHAP|). Each dot is one account; horizontal position is that "
-        'feature\'s contribution to the log-odds of "bot", colour encodes feature value '
-        "(red=high, blue=low). The model's decision is dominated by profile-metadata signals - "
-        "verified status, followers/friends ratio, and account-age-normalised activity rates - rather "
-        "than raw volume counters. The concentration of signal in a small band of interpretable "
-        "features supports the interpretability claim and means adversarial robustness hinges on how "
-        "easily an attacker can manipulate those specific profile attributes, not on hidden embeddings."
+        f"{_pretty_model_name(model_name)} on the held-out test split. Global SHAP beeswarm "
+        f"(top {top_n} features by mean |SHAP|). Each dot is one account; horizontal position is that "
+        'feature\'s contribution to the log-odds of "bot"; colour encodes feature value '
+        "(red=high, blue=low)."
+        + drivers
+        + " Interpretation should follow the plotted ranking, not fixed feature names."
     )
 
 
@@ -61,12 +94,16 @@ def export_poster_shap(
     top_n: int = 10,
     title: str | None = None,
 ) -> Path:
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
     import shap
 
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = f"shap_summary_{model_name}_poster"
-    (out / f"{stem}_caption.md").write_text(_caption(model_name, top_n) + "\n", encoding="utf-8")
+    (out / f"{stem}_caption.md").write_text(
+        _caption(shap_values, feature_names, model_name, top_n) + "\n", encoding="utf-8"
+    )
     display = [LABEL_MAP.get(str(n), str(n)) for n in feature_names]
     with mpl.rc_context({
         "font.size": 14, "axes.labelsize": 16, "axes.titlesize": 16,

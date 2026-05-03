@@ -8,8 +8,6 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from explainability.poster_shap import export_poster_shap
-
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,6 +17,8 @@ class PosterShapExportTest(unittest.TestCase):
             import matplotlib.pyplot as plt
         except ImportError:
             self.skipTest("matplotlib not installed")
+
+        from explainability.poster_shap import export_poster_shap
 
         fake_shap = types.SimpleNamespace(
             summary_plot=lambda *_args, **_kwargs: plt.scatter([0, 1], [0, 1], s=10)
@@ -44,12 +44,15 @@ class PosterShapExportTest(unittest.TestCase):
             self.assertIn("top 7 features", caption)
             self.assertNotIn("XGBoost", caption)
             self.assertNotIn("top 10 features", caption)
+            self.assertIn("Followers (count)", caption)
 
     def test_export_poster_shap_sets_takeaway_title_by_default(self):
         try:
             import matplotlib.pyplot as plt
         except ImportError:
             self.skipTest("matplotlib not installed")
+
+        from explainability.poster_shap import export_poster_shap
 
         fake_shap = types.SimpleNamespace(
             summary_plot=lambda *_args, **_kwargs: plt.scatter([0, 1], [0, 1], s=10)
