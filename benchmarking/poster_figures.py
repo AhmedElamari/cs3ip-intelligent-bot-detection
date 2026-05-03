@@ -205,6 +205,7 @@ def _plot_grouped_metric(
                     fontweight="bold",
                 )
     ax.set(
+        xlabel="Model",
         ylabel=ylabel,
         title=title,
         ylim=ylim,
@@ -238,23 +239,22 @@ def plot_degradation(
         return fig
 
     fig, axes = plt.subplots(
-        2,
         1,
-        figsize=(max(9.5, 2.5 * len(models)), 8.2),
-        constrained_layout=True,
-        sharex=True,
+        2,
+        figsize=(max(10.0, 3.25 * len(models)), 4.6),
+        constrained_layout=False,
     )
-    fig.suptitle("Measured robustness under selected adversarial profiles")
+    fig.subplots_adjust(left=0.07, right=0.98, bottom=0.17, top=0.82, wspace=0.16)
     _plot_grouped_metric(
         axes[0],
         models,
         scenarios,
         attacked_recall,
         ylabel="Recall on attacked true bots",
-        title="Attacked true-bot recall (primary evidence)",
+        title="Attacked true-bot recall",
         ylim=(0, 1.08),
         annotate_delta=False,
-        show_legend=True,
+        show_legend=False,
     )
     _plot_grouped_metric(
         axes[1],
@@ -262,11 +262,29 @@ def plot_degradation(
         scenarios,
         f1,
         ylabel="Macro-F1 (test set)",
-        title="Full-test Macro-F1 (conservative global context)",
+        title="Full-test Macro-F1",
         ylim=(0, 1.08),
         annotate_delta=False,
         show_legend=False,
     )
+    axes[0].yaxis.labelpad = 8
+    axes[1].yaxis.labelpad = 8
+    for ax in axes:
+        ax.title.set_fontsize(12)
+        ax.xaxis.label.set_fontsize(11)
+        ax.yaxis.label.set_fontsize(11)
+        ax.tick_params(axis="both", labelsize=10)
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=len(scenarios),
+            bbox_to_anchor=(0.5, 0.98),
+            frameon=False,
+            fontsize=9,
+        )
     return fig
 
 
@@ -288,10 +306,102 @@ def _attack_targeted_summary_sentence(attacked_recall: np.ndarray, scenarios: Se
     worst_scenario = attack_scenarios[worst_idx]
     worst_delta = float(mean_deltas[worst_idx])
     return (
-        "Attacked true-bot recall is the primary evidence because only true-bot rows are perturbed; "
-        f"the largest mean delta occurs under {SCENARIO_LABELS.get(worst_scenario, worst_scenario)} "
+        "Because perturbations are applied only to true-bot rows, attacked true-bot recall isolates "
+        "the targeted evasion effect; "
+        f"the largest mean recall delta occurs under {SCENARIO_LABELS.get(worst_scenario, worst_scenario)} "
         f"({worst_delta:+.02f} vs baseline)."
     )
+
+
+def _delta(value: float, baseline: float) -> float:
+    return float(value) - float(baseline)
+
+
+def _delta_pct(value: float, baseline: float) -> float:
+    baseline = float(baseline)
+    if not math.isfinite(baseline) or baseline == 0:
+        return float("nan")
+    return 100.0 * _delta(value, baseline) / baseline
+
+
+def _round_table_value(value: Any) -> Any:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return value
+    return round(number, 4) if math.isfinite(number) else np.nan
+
+
+def robustness_delta_table(
+    degradation: pd.DataFrame,
+    summary: pd.DataFrame,
+    models: Sequence[str],
+    scenarios: Sequence[str],
+) -> pd.DataFrame:
+    """Companion table with exact baseline-vs-attacked degradation statistics."""
+    rows = []
+    degradation = degradation[degradation["model"].isin(models)].copy()
+    summary = summary[summary["model"].isin(models)].copy()
+    for model in models:
+        model_degradation = degradation[degradation["model"] == model].set_index("scenario")
+        if "baseline" not in model_degradation.index:
+            continue
+        baseline_macro_f1 = float(model_degradation.loc["baseline", "macro_f1"])
+        baseline_pr_auc = float(model_degradation.loc["baseline", "pr_auc"])
+        for scenario in scenarios:
+            if scenario == "baseline" or scenario not in model_degradation.index:
+                continue
+            profile_rows = summary[(summary["model"] == model) & (summary["profile"] == scenario)]
+            if profile_rows.empty:
+                continue
+            profile = profile_rows.iloc[0]
+            attacked_macro_f1 = float(model_degradation.loc[scenario, "macro_f1"])
+            attacked_pr_auc = float(model_degradation.loc[scenario, "pr_auc"])
+            baseline_recall = float(profile["attacked_bot_recall_baseline"])
+            attacked_recall = float(profile["attacked_bot_recall"])
+            rows.append({
+                "Model": MODEL_LABELS.get(model, pretty_model(model)),
+                "Attack Profile": SCENARIO_LABELS.get(scenario, scenario),
+                "Attacked True Bots": int(profile["attacked_true_bots"]),
+                "Baseline Recall": baseline_recall,
+                "Attacked Recall": attacked_recall,
+                "Recall Delta": _delta(attacked_recall, baseline_recall),
+                "Recall Delta %": _delta_pct(attacked_recall, baseline_recall),
+                "Baseline Macro-F1": baseline_macro_f1,
+                "Attacked Macro-F1": attacked_macro_f1,
+                "Macro-F1 Delta": _delta(attacked_macro_f1, baseline_macro_f1),
+                "Macro-F1 Delta %": _delta_pct(attacked_macro_f1, baseline_macro_f1),
+                "Baseline PR-AUC": baseline_pr_auc,
+                "Attacked PR-AUC": attacked_pr_auc,
+                "PR-AUC Delta": _delta(attacked_pr_auc, baseline_pr_auc),
+                "PR-AUC Delta %": _delta_pct(attacked_pr_auc, baseline_pr_auc),
+                "Flip Rate": float(profile["flip_rate"]),
+                "Mean Confidence Drop": float(profile["confidence_drop_mean"]),
+                "Mean Non-Flip Confidence Drop": float(profile["confidence_drop_non_flip_mean"]),
+            })
+    table = pd.DataFrame(rows)
+    if table.empty:
+        return table
+    for column in table.columns:
+        if column not in {"Model", "Attack Profile", "Attacked True Bots"}:
+            table[column] = table[column].map(_round_table_value)
+    return table
+
+
+def write_robustness_delta_table(output_dir: Path, table: pd.DataFrame) -> None:
+    if table.empty:
+        return
+    stem = Path(output_dir) / "robustness_profile_degradation_table"
+    table.to_csv(stem.with_suffix(".csv"), index=False)
+    lines = [
+        "Exact robustness deltas for the plotted attack profiles.",
+        "",
+        "| " + " | ".join(table.columns) + " |",
+        "| " + " | ".join("---" for _ in table.columns) + " |",
+    ]
+    for _, row in table.iterrows():
+        lines.append("| " + " | ".join(str(row[column]) for column in table.columns) + " |")
+    stem.with_suffix(".md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def degradation_caption(
@@ -329,15 +439,21 @@ def degradation_caption(
         )
     else:
         body = (
-            f"**Figure H1. Measured robustness under selected adversarial profiles ({model_phrase}, TwiBot-20 test).**\n\n"
-            f"The top panel shows attacked true-bot recall for {ranked_phrase}; this is the primary evidence "
-            "because only true-bot rows are perturbed. The bottom panel keeps Full-test Macro-F1 as conservative "
-            "global context rather than the main attack-severity claim. "
+            f"**Figure H1. Test-set robustness under selected adversarial profile perturbations "
+            f"({model_phrase}).**\n\n"
+            f"Bars report single-run values on the TwiBot-20 held-out test split for {ranked_phrase} "
+            f"across {scenario_text}. Non-baseline evasion profiles perturb only true-bot rows using the "
+            "configured profile perturbations from the robustness analysis. "
+            "The top panel reports recall on the attacked true-bot subset; the bottom panel reports full-test "
+            "Macro-F1 so the targeted effect is shown alongside overall test-set performance. "
             + _attack_targeted_summary_sentence(attacked_recall, scenarios)
             + " "
             + summary
-            + "\n\n**Attacked true-bot recall:** plotted directly as the primary robustness signal.\n\n"
-            + f"**Full-test Macro-F1:** {takeaway}. This remains a conservative global metric because human rows are unchanged.\n\n"
+            + "\n\nExact baseline-vs-attack deltas, percentage changes, PR-AUC changes, flip rates, and confidence-drop "
+            "statistics are reported "
+            "in `robustness_profile_degradation_table.csv`.\n\n"
+            + "**Attacked true-bot recall:** targeted-subset recall after profile perturbation.\n\n"
+            + f"**Full-test Macro-F1:** {takeaway}.\n\n"
             + "**PR-AUC by scenario:**\n\n"
             + pr_lines
         )
