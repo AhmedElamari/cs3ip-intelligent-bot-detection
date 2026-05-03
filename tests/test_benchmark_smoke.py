@@ -172,6 +172,30 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         if not SCIPY_AVAILABLE:
             self.assertTrue((sig_df['mcnemar_type'] == 'unavailable').all())
 
+    def test_default_statistics_include_f1_macro(self):
+        from benchmarking.data_prep import prepare_data
+        from benchmarking.model_factory import create_models
+        from benchmarking import ModelBenchmark
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        config = Config()
+        for name in config.get('models', {}).keys():
+            config.set(f'models.{name}.enabled', name in ('logistic_regression', 'random_forest'))
+        config.set('preprocessing.scale_features', True)
+
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepare_data(splits, config)
+        benchmark = ModelBenchmark(models=create_models(config), experiment_name='stats_defaults')
+        benchmark.run_benchmark(
+            X_train, y_train, X_val, y_val, X_test, y_test,
+            feature_names=feature_names, verbose=False,
+            compute_statistics=True,
+            statistics_bootstrap_samples=20,
+            enable_scaling=True,
+        )
+        self.assertIn('f1_macro', set(benchmark.get_confidence_intervals()['metric']))
+        self.assertIn('f1_macro', set(benchmark.get_pairwise_significance()['metric']))
+
     def test_holm_corrected_column_present(self):
         benchmark = self._run_lr_rf_benchmark()
         sig_df = benchmark.get_pairwise_significance()
@@ -234,6 +258,21 @@ class BenchmarkStatisticsIntegrationTest(unittest.TestCase):
         )
         self.assertTrue(benchmark.get_confidence_intervals().empty)
         self.assertTrue(benchmark.get_pairwise_significance().empty)
+
+    def test_prepare_data_return_metadata_alignment(self):
+        from benchmarking.data_prep import prepare_data
+        from config import Config
+
+        splits = _make_synthetic_splits(n_samples=60)
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names, metadata = prepare_data(
+            splits,
+            Config(),
+            return_metadata=True,
+        )
+        self.assertEqual(len(metadata), len(X_test))
+        self.assertEqual(metadata['label'].tolist(), y_test.astype(int).tolist())
+        self.assertIn('user_id', metadata.columns)
+        self.assertIn('row_index', metadata.columns)
 
 
 class XGBoostBenchmarkSmokeTest(unittest.TestCase):
@@ -616,6 +655,10 @@ class XAIPreparedInputsContractTest(unittest.TestCase):
             self.assertTrue((out / 'robustness_summary.csv').exists())
             self.assertTrue((out / 'feature_attack_results.csv').exists())
             self.assertTrue((out / 'robustness_degradation.csv').exists())
+            self.assertTrue((out / 'feature_resilience.csv').exists())
+            self.assertTrue((out / 'feature_resilience.md').exists())
+            self.assertTrue((out / 'shap_rank_stability.csv').exists())
+            self.assertTrue((out / 'shap_cumulative_ablation.csv').exists())
             try:
                 import matplotlib  # noqa: F401
             except ImportError:

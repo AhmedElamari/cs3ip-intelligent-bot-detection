@@ -39,6 +39,31 @@ class BootstrapCITest(unittest.TestCase):
         self.assertLessEqual(lower, point)
         self.assertLessEqual(point, upper)
 
+
+class StatisticsDefaultsTest(unittest.TestCase):
+    def setUp(self):
+        if not (SKLEARN_AVAILABLE and NUMPY_AVAILABLE):
+            self.skipTest("Required dependencies not installed")
+        import numpy as np
+        from benchmarking.metrics import MetricsCalculator
+        self.np = np
+        self.calc = MetricsCalculator()
+
+        rng = np.random.RandomState(42)
+        n = 100
+        self.y_true = rng.randint(0, 2, n)
+        self.y_pred = (rng.rand(n) > 0.4).astype(int)
+        raw_proba = rng.rand(n, 2)
+        self.y_proba = (raw_proba / raw_proba.sum(axis=1, keepdims=True))
+
+    def test_statistics_defaults_include_dissertation_metrics(self):
+        from benchmarking.model_benchmark import DEFAULT_METRICS
+
+        metrics = DEFAULT_METRICS["statistics"]
+        self.assertIn("f1", metrics)
+        self.assertIn("f1_macro", metrics)
+        self.assertIn("pr_auc", metrics)
+
     def test_ci_deterministic(self):
         r1 = self.calc.bootstrap_metric_ci(
             self.y_true, self.y_pred, self.y_proba, metric='f1',

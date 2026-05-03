@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Dict, Iterable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -31,6 +31,7 @@ class AttackResult:
     cost_tier: str
     attack_name: str
     skip_reason: str = ""
+    diagnostics: List[Dict[str, object]] = field(default_factory=list)
 
 
 class RealisticPerturbationEngine:
@@ -60,6 +61,7 @@ class RealisticPerturbationEngine:
         self._human_frame = self._train_frame.loc[self._y_train == 0]
         self._human_stats = self._build_human_stats()
         self._recipes = self._build_recipes()
+        self._static_recipe_keys = frozenset(self._recipes.keys())
 
     def _to_frame(self, X: pd.DataFrame) -> pd.DataFrame:
         if isinstance(X, pd.DataFrame):
@@ -72,7 +74,10 @@ class RealisticPerturbationEngine:
         desc = human.get('description_length')
         if desc is not None:
             positive_desc = desc[desc > 0]
-            stats['description_length'] = float(positive_desc.median()) if not positive_desc.empty else 1.0
+            stats['description_length'] = (
+                float(positive_desc.quantile(0.25, interpolation='lower'))
+                if not positive_desc.empty else 1.0
+            )
         for feature in ('followers_count', 'friends_count'):
             series = human.get(feature)
             if series is not None:
@@ -145,8 +150,94 @@ class RealisticPerturbationEngine:
             ),
         }
 
-    def available_single_feature_attacks(self) -> List[str]:
-        return list(self._recipes.keys())
+    def available_single_feature_attacks(self, builtin_only: bool = True) -> List[str]:
+        keys = sorted(self._recipes)
+        if builtin_only:
+            return [key for key in keys if key in self._static_recipe_keys]
+        return keys
+
+    def register_dynamic_recipe(self, feature: str) -> bool:
+        """Add a single-feature probe that masks toward human-train statistics (not part of profiles)."""
+        if feature in self._recipes:
+            return True
+        if feature not in self._train_frame.columns:
+            return False
+        kind = self._infer_feature_kind(feature)
+        if kind == 'binary':
+            self._recipes[feature] = self._build_dynamic_binary_recipe(feature)
+        else:
+            self._recipes[feature] = self._build_dynamic_numeric_recipe(feature)
+        return True
+
+    def _infer_feature_kind(self, feature: str) -> str:
+        series = pd.to_numeric(self._train_frame[feature], errors='coerce').dropna()
+        if series.empty:
+            return 'numeric'
+        uniq = np.unique(series.to_numpy())
+        if len(uniq) <= 2 and np.all(np.isin(uniq, (0.0, 1.0))):
+            return 'binary'
+        return 'numeric'
+
+    def _human_feature_series(self, feature: str) -> pd.Series:
+        series = self._human_frame.get(feature)
+        return series if series is not None else self._train_frame[feature]
+
+    def _human_binary_majority(self, feature: str) -> Optional[int]:
+        vals = self._human_feature_series(feature).dropna()
+        if vals.empty:
+            return None
+        mode = vals.mode()
+        if len(mode):
+            return int(round(float(mode.iloc[0])))
+        return int(round(float(vals.median())))
+
+    def _human_numeric_median_for_feature(self, feature: str) -> Optional[float]:
+        numeric = pd.to_numeric(
+            self._human_feature_series(feature),
+            errors='coerce',
+        ).dropna()
+        if numeric.empty:
+            return None
+        return float(numeric.median())
+
+    def _build_dynamic_binary_recipe(self, feature: str) -> AttackRecipe:
+        majority = self._human_binary_majority(feature)
+
+        def mutation_rule(frame: pd.DataFrame, engine: RealisticPerturbationEngine) -> bool:
+            if majority is None:
+                return False
+            return engine._set_feature_constant(frame, feature, int(majority))
+
+        return AttackRecipe(
+            feature=feature,
+            cost_tier='generic_mask',
+            profile_membership=(),
+            mutation_rule=mutation_rule,
+            skip_reason='binary majority unavailable',
+        )
+
+    def _build_dynamic_numeric_recipe(self, feature: str) -> AttackRecipe:
+        median = self._human_numeric_median_for_feature(feature)
+
+        def mutation_rule(frame: pd.DataFrame, engine: RealisticPerturbationEngine) -> bool:
+            if median is None:
+                return False
+            return engine._set_feature_constant(frame, feature, float(max(0.0, median)))
+
+        return AttackRecipe(
+            feature=feature,
+            cost_tier='generic_mask',
+            profile_membership=(),
+            mutation_rule=mutation_rule,
+            skip_reason='numeric human median unavailable',
+        )
+
+    def _set_feature_constant(self, frame: pd.DataFrame, feature: str, value: float) -> bool:
+        if feature not in frame.columns:
+            return False
+        before = frame[feature].copy()
+        frame[feature] = value
+        return not before.equals(frame[feature])
 
     def apply_single_feature_attack(self, X: pd.DataFrame, feature: str) -> AttackResult:
         recipe = self._recipes.get(feature)
@@ -161,29 +252,73 @@ class RealisticPerturbationEngine:
         self._recompute_derived(frame)
         return AttackResult(frame, True, feature, recipe.cost_tier, feature)
 
-    def apply_profile(self, X: pd.DataFrame, profile: str) -> AttackResult:
+    def apply_profile(self, X: pd.DataFrame, profile: str, collect_diagnostics: bool = False) -> AttackResult:
         frame = self._to_frame(X)
         applied = False
-        for recipe in self._recipes.values():
-            if profile not in recipe.profile_membership:
-                continue
+        diagnostics = []
+        recipes = [recipe for recipe in self._recipes.values() if profile in recipe.profile_membership]
+        diagnostic_columns = []
+        if collect_diagnostics:
+            diagnostic_columns = sorted({
+                column
+                for recipe in recipes
+                for column in (recipe.feature, *recipe.dependent_recomputations)
+                if column in frame.columns
+            })
+        before_profile = frame[diagnostic_columns].copy() if diagnostic_columns else None
+        for recipe in recipes:
             if recipe.feature not in frame.columns:
                 continue
-            applied = recipe.mutation_rule(frame, self) or applied
+            before_feature = frame[recipe.feature].copy() if collect_diagnostics else None
+            recipe_applied = recipe.mutation_rule(frame, self)
+            if collect_diagnostics:
+                diagnostics.append((
+                    recipe,
+                    recipe_applied,
+                    '' if recipe_applied else recipe.skip_reason,
+                    before_feature,
+                    frame[recipe.feature].copy(),
+                ))
+            applied = recipe_applied or applied
         if applied:
             self._recompute_derived(frame)
-        return AttackResult(frame, applied, None, 'profile', profile, '' if applied else 'no applicable feature recipes')
+        if not collect_diagnostics:
+            return AttackResult(
+                frame, applied, None, 'profile', profile, '' if applied else 'no applicable feature recipes'
+            )
+        after_profile = frame[diagnostic_columns].copy()
+        return AttackResult(
+            frame,
+            applied,
+            None,
+            'profile',
+            profile,
+            '' if applied else 'no applicable feature recipes',
+            diagnostics=[
+                self._profile_diagnostic(
+                    before_profile,
+                    after_profile,
+                    before_feature,
+                    after_feature,
+                    recipe,
+                    recipe_applied,
+                    profile,
+                    skip_reason,
+                )
+                for recipe, recipe_applied, skip_reason, before_feature, after_feature in diagnostics
+            ],
+        )
 
     def _apply_has_description(self, frame: pd.DataFrame) -> bool:
         changed = self._flip_binary(frame, 'has_description', 1)
         if 'description_length' in frame.columns:
             target = max(1.0, self._human_stats.get('description_length', 1.0))
-            changed = self._raise_to_target(frame, 'description_length', target) or changed
+            changed = self._set_short_human_bio(frame, target) or changed
         return changed
 
     def _apply_description_length(self, frame: pd.DataFrame) -> bool:
         target = max(1.0, self._human_stats.get('description_length', 1.0))
-        changed = self._raise_to_target(frame, 'description_length', target)
+        changed = self._set_short_human_bio(frame, target)
         if 'has_description' in frame.columns:
             changed = self._flip_binary(frame, 'has_description', 1) or changed
         return changed
@@ -195,12 +330,13 @@ class RealisticPerturbationEngine:
         frame[feature] = target
         return not before.equals(frame[feature])
 
-    def _raise_to_target(self, frame: pd.DataFrame, feature: str, target: float) -> bool:
-        if feature not in frame.columns:
+    def _set_short_human_bio(self, frame: pd.DataFrame, target: float) -> bool:
+        if 'description_length' not in frame.columns:
             return False
-        before = frame[feature].copy()
-        frame[feature] = np.maximum(frame[feature], target)
-        return not before.equals(frame[feature])
+        before = frame['description_length'].copy()
+        current = frame['description_length'].astype(float)
+        frame['description_length'] = np.where(current <= 0, target, np.minimum(current, target))
+        return not before.equals(frame['description_length'])
 
     def _nudge_count(self, frame: pd.DataFrame, feature: str) -> bool:
         if feature not in frame.columns:
@@ -227,3 +363,76 @@ class RealisticPerturbationEngine:
             frame['tweets_per_day'] = frame['statuses_count'] / safe_age
         if {'favourites_count', 'favourites_per_day'}.issubset(frame.columns):
             frame['favourites_per_day'] = frame['favourites_count'] / safe_age
+
+    @staticmethod
+    def _changed_mask(before: pd.Series, after: pd.Series) -> pd.Series:
+        return ~(before.eq(after) | (before.isna() & after.isna()))
+
+    @staticmethod
+    def _stable_numeric_stats(values: pd.Series) -> tuple[float, float]:
+        numeric = pd.to_numeric(values, errors='coerce')
+        if numeric.notna().sum() == 0:
+            return np.nan, np.nan
+        return float(numeric.mean()), float(numeric.median())
+
+    def _profile_diagnostic(
+        self,
+        before_profile: pd.DataFrame,
+        after_profile: pd.DataFrame,
+        before_feature: pd.Series,
+        after_feature: pd.Series,
+        recipe: AttackRecipe,
+        recipe_applied: bool,
+        profile: str,
+        skip_reason: str,
+    ) -> Dict[str, object]:
+        changed_mask = self._changed_mask(before_feature, after_feature)
+        changed_rows = int(changed_mask.sum())
+        total_rows = len(before_feature)
+        pre_mean, pre_median = self._stable_numeric_stats(before_feature)
+        post_mean, post_median = self._stable_numeric_stats(after_feature)
+
+        before_numeric = pd.to_numeric(before_feature, errors='coerce')
+        after_numeric = pd.to_numeric(after_feature, errors='coerce')
+        valid = before_numeric.notna() & after_numeric.notna()
+        if valid.any():
+            abs_delta = (after_numeric[valid] - before_numeric[valid]).abs()
+            rel_delta = abs_delta / before_numeric[valid].abs().clip(lower=1.0)
+            mean_abs_delta = float(abs_delta.mean())
+            max_abs_delta = float(abs_delta.max())
+            mean_relative_delta = float(rel_delta.mean())
+        else:
+            mean_abs_delta = np.nan
+            max_abs_delta = np.nan
+            mean_relative_delta = np.nan
+
+        relevant_columns = [recipe.feature, *recipe.dependent_recomputations]
+        changed_columns = [
+            column for column in relevant_columns
+            if column in before_profile.columns and column in after_profile.columns
+            and (
+                (
+                    column == recipe.feature and changed_rows > 0
+                ) or (
+                    column != recipe.feature and recipe_applied and
+                    bool(self._changed_mask(before_profile[column], after_profile[column]).any())
+                )
+            )
+        ]
+        return {
+            'profile': profile,
+            'feature': recipe.feature,
+            'cost_tier': recipe.cost_tier,
+            'recipe_applied': recipe_applied,
+            'changed_rows': changed_rows,
+            'changed_fraction': (changed_rows / total_rows) if total_rows else 0.0,
+            'changed_columns': ';'.join(changed_columns),
+            'pre_mean': pre_mean,
+            'post_mean': post_mean,
+            'pre_median': pre_median,
+            'post_median': post_median,
+            'mean_abs_delta': mean_abs_delta,
+            'max_abs_delta': max_abs_delta,
+            'mean_relative_delta': mean_relative_delta,
+            'skip_reason': '' if recipe_applied else skip_reason,
+        }

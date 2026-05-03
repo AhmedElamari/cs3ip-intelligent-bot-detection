@@ -7,10 +7,16 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 from config import Config
 from explainability import SHAPExplainer, LIMEExplainer, FeatureImportanceAnalyzer
+
+
+def export_poster_shap(*args, **kwargs):
+    """Lazily import poster SHAP export support only when it is actually used."""
+    from explainability.poster_shap import export_poster_shap as _export_poster_shap
+
+    return _export_poster_shap(*args, **kwargs)
 
 
 def run_explainability_analysis(
@@ -55,6 +61,8 @@ def run_explainability_analysis(
 
             if config.get('output.save_plots'):
                 try:
+                    import matplotlib.pyplot as plt
+
                     fig = analyzer.plot_importance_comparison(comparison_df)
                     fig.savefig(output_dir / 'feature_importance_comparison.png', dpi=150, bbox_inches='tight')
                     plt.close(fig)
@@ -71,7 +79,8 @@ def run_explainability_analysis(
         )
 
         # SHAP for tree-based models + TabNet (uses model-agnostic KernelExplainer path).
-        target_models = ['random_forest', 'xgboost', 'tabnet']
+        poster_model = str(config.get('explainability.poster.model', 'xgboost'))
+        target_models = list(dict.fromkeys(['random_forest', 'xgboost', 'tabnet', poster_model]))
 
         for model_name in target_models:
             if model_name not in benchmark.results:
@@ -142,12 +151,27 @@ def run_explainability_analysis(
 
                 xai_results[f'shap_{model_name}'] = shap_importance
 
-                # Save SHAP summary plot
                 if config.get('output.save_plots'):
                     try:
-                        fig = shap_explainer.plot_summary(X_test_m[:min(50, len(X_test_m))], max_display=10)
+                        import matplotlib.pyplot as plt
+
+                        n_shap = min(50, len(X_test_m))
+                        X_shap = X_test_m[:n_shap]
+                        fig = shap_explainer.plot_summary(X_shap, max_display=10)
                         fig.savefig(output_dir / f'shap_summary_{model_name}.png', dpi=150, bbox_inches='tight')
                         plt.close(fig)
+                        if (
+                            config.get('explainability.poster.enabled', False)
+                            and model_name == config.get('explainability.poster.model', 'xgboost')
+                        ):
+                            export_poster_shap(
+                                shap_explainer.shap_values,
+                                X_shap,
+                                list(feature_names),
+                                model_name=model_name,
+                                output_dir=output_dir / 'poster',
+                                top_n=int(config.get('explainability.poster.top_n', 10)),
+                            )
                     except Exception as e:
                         print(f"Could not save SHAP plot: {e}")
 
@@ -199,4 +223,140 @@ def run_explainability_analysis(
         except Exception as e:
             print(f"LIME analysis failed: {e}")
 
+        if getattr(benchmark, "test_metadata", None) is not None:
+            try:
+                export_misclassified_bot_lime(
+                    benchmark,
+                    feature_names,
+                    output_dir,
+                    n_examples=3,
+                    num_lime_features=config.get('explainability.lime.num_features', 10),
+                )
+            except Exception as e:
+                print(f"Misclassified-bot LIME export failed: {e}")
+
     return xai_results
+
+
+def export_misclassified_bot_lime(
+    benchmark: Any,
+    feature_names: list,
+    output_dir: Path,
+    n_examples: int = 3,
+    num_lime_features: int = 10,
+) -> None:
+    """Export LIME explanations for false-negative bot accounts from the best model."""
+    best_name, best_model, _ = benchmark.get_best_model('f1')
+    y_true = np.asarray(benchmark.y_test)
+    y_pred = np.asarray(benchmark.predictions[best_name])
+    proba = np.asarray(benchmark.probabilities[best_name])
+    if proba.ndim == 1:
+        proba = np.column_stack([1.0 - proba, proba])
+
+    false_negative_idx = np.where((y_true == 1) & (y_pred == 0))[0]
+    if false_negative_idx.size == 0:
+        (output_dir / 'lime_misclassified_bots.md').write_text(
+            "No false-negative bot accounts were available for LIME export on this test split.\n",
+            encoding='utf-8',
+        )
+        pd.DataFrame(columns=_lime_export_columns()).to_csv(
+            output_dir / 'lime_misclassified_bots.csv',
+            index=False,
+        )
+        return
+
+    order = np.argsort(proba[false_negative_idx, 1], kind='mergesort')
+    selected_idx = false_negative_idx[order[:n_examples]]
+
+    X_train_m, _, X_test_m = benchmark.get_prepared_inputs(best_name)
+    lime_explainer = LIMEExplainer(best_model, feature_names)
+    lime_explainer.fit(X_train_m)
+
+    metadata = benchmark.test_metadata.reset_index(drop=True)
+    rows = []
+    for test_idx in selected_idx:
+        instance = X_test_m.iloc[test_idx].to_numpy() if isinstance(X_test_m, pd.DataFrame) else X_test_m[test_idx]
+        explanation = lime_explainer.explain_instance(instance, num_features=num_lime_features)
+        rows.append(_lime_export_row(metadata, test_idx, y_true, y_pred, proba, explanation))
+
+    frame = pd.DataFrame(rows, columns=_lime_export_columns())
+    frame.to_csv(output_dir / 'lime_misclassified_bots.csv', index=False)
+    (output_dir / 'lime_misclassified_bots.md').write_text(
+        _lime_markdown(frame, best_name),
+        encoding='utf-8',
+    )
+
+
+def _lime_export_row(metadata, test_idx, y_true, y_pred, proba, explanation):
+    meta = metadata.iloc[int(test_idx)] if int(test_idx) < len(metadata) else {}
+    row = {
+        'user_id': str(meta.get('user_id', 'n/a')) if hasattr(meta, 'get') else 'n/a',
+        'test_row_index': int(meta.get('row_index', test_idx)) if hasattr(meta, 'get') else int(test_idx),
+        'true_label': int(y_true[test_idx]),
+        'predicted_label': int(y_pred[test_idx]),
+        'predicted_bot_probability': float(proba[test_idx, 1]),
+        'predicted_human_probability': float(proba[test_idx, 0]),
+    }
+    contributions = sorted(
+        explanation['feature_contributions'].items(),
+        key=lambda item: abs(item[1]),
+        reverse=True,
+    )[:3]
+    for index in range(3):
+        feature, contribution = contributions[index] if index < len(contributions) else ('', np.nan)
+        row[f'top_{index + 1}_feature'] = feature
+        row[f'top_{index + 1}_contribution'] = contribution
+        row[f'top_{index + 1}_direction'] = _lime_direction(contribution)
+    return row
+
+
+def _lime_direction(contribution) -> str:
+    if pd.isna(contribution):
+        return ''
+    return 'toward_human' if contribution >= 0 else 'toward_bot'
+
+
+def _lime_export_columns() -> list:
+    base = [
+        'user_id',
+        'test_row_index',
+        'true_label',
+        'predicted_label',
+        'predicted_bot_probability',
+        'predicted_human_probability',
+    ]
+    contributor_columns = []
+    for index in range(1, 4):
+        contributor_columns.extend([
+            f'top_{index}_feature',
+            f'top_{index}_contribution',
+            f'top_{index}_direction',
+        ])
+    return base + contributor_columns
+
+
+def _lime_markdown(frame: pd.DataFrame, model_name: str) -> str:
+    lines = [
+        "# Misclassified Bot LIME Examples",
+        "",
+        f"Best model: `{model_name}`. Examples are false-negative bots sorted by lowest predicted bot probability.",
+    ]
+    for _, row in frame.iterrows():
+        lines.extend([
+            "",
+            f"## Test row {int(row['test_row_index'])}",
+            f"- user_id: `{row['user_id']}`",
+            f"- true label: `{int(row['true_label'])}`; predicted label: `{int(row['predicted_label'])}`",
+            f"- predicted bot probability: {float(row['predicted_bot_probability']):.4f}",
+            f"- predicted human probability: {float(row['predicted_human_probability']):.4f}",
+            "- top LIME contributors:",
+        ])
+        for index in range(1, 4):
+            feature = row[f'top_{index}_feature']
+            if not feature:
+                continue
+            lines.append(
+                f"  - {feature}: {float(row[f'top_{index}_contribution']):+.4f} "
+                f"({row[f'top_{index}_direction']})"
+            )
+    return "\n".join(lines) + "\n"
