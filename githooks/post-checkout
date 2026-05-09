@@ -1,0 +1,21 @@
+#!/bin/sh
+# Fast-forward local `main` after a branch checkout lands on `main`.
+# Enable once per clone: git config core.hooksPath githooks
+#
+# Requires `origin` and remote branch `origin/main`. Uses --ff-only so your
+# local main never gets a surprise merge commit from this hook.
+
+is_branch_checkout="$3"
+
+[ "$is_branch_checkout" = "1" ] || exit 0
+
+branch=$(git symbolic-ref -q --short HEAD) || exit 0
+[ "$branch" = "main" ] || exit 0
+
+if ! git remote get-url origin >/dev/null 2>&1; then
+	exit 0
+fi
+
+git pull --ff-only origin main >/dev/null 2>&1 || {
+	echo "githooks/post-checkout: could not fast-forward main from origin (offline, diverged, or no remote main?). Run: git pull --ff-only origin main" >&2
+}
