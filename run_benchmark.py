@@ -15,6 +15,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Optional, Tuple
 
 import numpy as np
 from sklearn.utils.class_weight import compute_class_weight
@@ -23,9 +24,14 @@ from config import Config, load_config
 from benchmarking import ModelBenchmark
 from benchmarking.data_prep import load_data, prepare_data
 from benchmarking.model_factory import create_models
+from benchmarking.multi_seed import (
+    extract_per_seed_rows,
+    validate_seeds,
+    write_multi_seed_outputs,
+)
 from benchmarking.output_utils import save_final_outputs
 from benchmarking.robustness import run_robustness_analysis
-from benchmarking.run_metadata import BenchmarkRunContext
+from benchmarking.run_metadata import BenchmarkRunContext, write_run_metadata
 from benchmarking.time_stratified_results import build_temporal_split_dict, format_protocol_note
 from benchmarking.xai_reporting import run_explainability_analysis
 from benchmarking.hpo.service import (
@@ -93,6 +99,143 @@ def _run_hpo_for_config(
     return summaries
 
 
+def _run_single_benchmark_pipeline(
+    *,
+    cfg: Config,
+    config_before_hpo: Config,
+    args: argparse.Namespace,
+    data_splits: dict[str, Any],
+    output_dir: Path,
+    timestamp: str,
+    experiment_name: str,
+    statistics_random_state: int,
+    compute_statistics: bool,
+    include_concept_drift: bool,
+) -> Tuple[ModelBenchmark, Optional[ModelBenchmark], str, list[str]]:
+    """Prepare data, HPO, train models, optional concept-drift benchmark. Writes hpo_summary.json."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    prepared_data = prepare_data(data_splits, cfg, return_metadata=True)
+    if len(prepared_data) == 8:
+        (
+            X_train,
+            X_val,
+            X_test,
+            y_train,
+            y_val,
+            y_test,
+            feature_names,
+            test_metadata,
+        ) = prepared_data
+    else:
+        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepared_data
+        test_metadata = None
+
+    hpo_summaries = _run_hpo_for_config(
+        cfg,
+        args,
+        X_train=X_train,
+        y_train=y_train,
+        X_val=X_val,
+        y_val=y_val,
+        feature_names=feature_names,
+    )
+
+    summary_path = output_dir / "hpo_summary.json"
+    summary_path.write_text(
+        json.dumps(
+            {"schema_version": "HPOSummaryV1", "models": hpo_summaries},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print(f"\nHPO summary written to: {summary_path}")
+
+    models = create_models(cfg)
+
+    benchmark = ModelBenchmark(
+        models=models,
+        experiment_name=experiment_name,
+    )
+    benchmark.hpo_audit_by_model = hpo_summaries
+    benchmark.set_test_metadata(test_metadata)
+
+    benchmark.run_benchmark(
+        X_train, y_train,
+        X_val, y_val,
+        X_test, y_test,
+        feature_names=feature_names,
+        verbose=True,
+        compute_statistics=compute_statistics,
+        statistics_bootstrap_samples=args.statistics_bootstrap_samples,
+        include_mcnemar=not args.skip_mcnemar,
+        enable_scaling=cfg.get('preprocessing.scale_features'),
+        statistics_random_state=statistics_random_state,
+    )
+
+    benchmark.print_summary()
+
+    drift_benchmark = None
+    drift_protocol_note = ""
+    if include_concept_drift and cfg.get('concept_drift.enabled'):
+        drift_cfg = copy.deepcopy(cfg)
+        _reset_model_params_to_base(drift_cfg, config_before_hpo)
+        temporal = build_temporal_split_dict(
+            data_splits,
+            val_size=float(drift_cfg.get('concept_drift.val_size', 0.2)),
+            test_size=float(drift_cfg.get('concept_drift.test_size', 0.1)),
+            time_col=str(drift_cfg.get('concept_drift.time_col', 'account_creation_date')),
+            random_state=int(drift_cfg.get('random_state', 2112)),
+            min_samples_per_split=int(drift_cfg.get('concept_drift.min_samples_per_split', 1)),
+        )
+        drift_protocol_note = format_protocol_note(
+            temporal['train'],
+            temporal['val'],
+            temporal['test'],
+            time_col=str(drift_cfg.get('concept_drift.time_col', 'account_creation_date')),
+            reference_date_policy=str(
+                drift_cfg.get('concept_drift.reference_date_policy', 'dataset_observation_anchor')
+            ),
+        )
+        prepared_drift = prepare_data(
+            temporal,
+            drift_cfg,
+            return_metadata=False,
+            temporal_protocol=True,
+        )
+        Xd_tr, Xd_va, Xd_te, yd_tr, yd_va, yd_te, fd_names = prepared_drift
+        hpo_drift = _run_hpo_for_config(
+            drift_cfg,
+            args,
+            X_train=Xd_tr,
+            y_train=yd_tr,
+            X_val=Xd_va,
+            y_val=yd_va,
+            feature_names=fd_names,
+        )
+        models_drift = create_models(drift_cfg)
+        drift_benchmark = ModelBenchmark(
+            models=models_drift,
+            experiment_name=f'{experiment_name}_concept_drift',
+        )
+        drift_benchmark.hpo_audit_by_model = hpo_drift
+        drift_benchmark.run_benchmark(
+            Xd_tr, yd_tr,
+            Xd_va, yd_va,
+            Xd_te, yd_te,
+            feature_names=fd_names,
+            verbose=True,
+            compute_statistics=compute_statistics,
+            statistics_bootstrap_samples=args.statistics_bootstrap_samples,
+            include_mcnemar=not args.skip_mcnemar,
+            enable_scaling=drift_cfg.get('preprocessing.scale_features'),
+            statistics_random_state=statistics_random_state,
+        )
+        drift_benchmark.print_summary()
+
+    return benchmark, drift_benchmark, drift_protocol_note, list(feature_names)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description='Bot Detection Model Benchmarking Pipeline (TwiBot-20 only)',
@@ -148,6 +291,17 @@ def _build_parser() -> argparse.ArgumentParser:
         '--skip-mcnemar',
         action='store_true',
         help='Skip McNemar paired test in pairwise significance output'
+    )
+    parser.add_argument(
+        '--seeds',
+        type=int,
+        nargs='+',
+        default=None,
+        help=(
+            'Run N independent training seeds (≥3 unique integers). Each seed writes outputs under '
+            '`seed_<seed>/`; parent directory gets multi_seed_results/summary. Skips XAI, robustness, '
+            'and concept-drift second benchmark; per-seed bootstrap stats are off by default.'
+        ),
     )
     parser.add_argument(
         '--robustness-analysis',
@@ -267,13 +421,7 @@ def _resolve_explainability_audit(args: argparse.Namespace, config: Config) -> d
     }
 
 
-def main():
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    if args.no_tune and args.retune:
-        parser.error("Cannot use --no-tune together with --retune")
-
+def _apply_config_from_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Config:
     if args.config:
         config = load_config(args.config)
     else:
@@ -335,6 +483,29 @@ def main():
     if args.time_stratified_results:
         config.set('concept_drift.enabled', True)
 
+    if args.seeds is not None:
+        args.explain = False
+        args.robustness_analysis = False
+        config.set('robustness.enabled', False)
+
+    return config
+
+
+def main():
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if args.no_tune and args.retune:
+        parser.error("Cannot use --no-tune together with --retune")
+
+    seeds_list = None
+    if args.seeds is not None:
+        try:
+            seeds_list = validate_seeds(args.seeds)
+        except (ValueError, TypeError) as exc:
+            parser.error(str(exc))
+
+    config = _apply_config_from_args(parser, args)
     config_before_hpo = copy.deepcopy(config)
 
     output_dir = Path(args.output)
@@ -347,7 +518,9 @@ def main():
     print("="*60)
     print("BOT DETECTION MODEL BENCHMARK")
     print("="*60)
-    if args.dissertation_core:
+    if seeds_list:
+        print(f"Mode: multi-seed ({len(seeds_list)} seeds: {seeds_list})")
+    elif args.dissertation_core:
         stats = "off" if args.skip_statistics else "on"
         print(
             "Mode: --dissertation-core (HPO + all models; inferential stats "
@@ -358,7 +531,14 @@ def main():
     print(f"Models: {config.get_enabled_models()}")
 
     explainability_audit = _resolve_explainability_audit(args, config)
-    if args.dissertation_core:
+    if seeds_list:
+        explainability_audit = {
+            'xai_enabled': False,
+            'xai_requested_by_cli': False,
+            'xai_enabled_in_config': bool(config.get('explainability.enabled')),
+            'xai_effective_source': 'multi_seed',
+        }
+    elif args.dissertation_core:
         explainability_audit = {
             'xai_enabled': False,
             'xai_requested_by_cli': False,
@@ -368,124 +548,98 @@ def main():
     state = "enabled" if explainability_audit['xai_enabled'] else "disabled"
     print(f"Explainability: {state} (source: {explainability_audit['xai_effective_source']})")
 
+    if seeds_list:
+        seeds_list.sort()
+        if config.get('concept_drift.enabled'):
+            print(
+                "\n[Note] Concept drift / --time-stratified second benchmark is skipped in multi-seed mode."
+            )
+
     data_splits = load_data(TWIBOT20_DATA_DIR)
+    config_path = str(Path(args.config).resolve()) if args.config else None
 
-    prepared_data = prepare_data(data_splits, config, return_metadata=True)
-    if len(prepared_data) == 8:
-        (
-            X_train,
-            X_val,
-            X_test,
-            y_train,
-            y_val,
-            y_test,
-            feature_names,
-            test_metadata,
-        ) = prepared_data
-    else:
-        X_train, X_val, X_test, y_train, y_val, y_test, feature_names = prepared_data
-        test_metadata = None
+    if seeds_list:
+        per_seed_metric_rows = []
+        for seed in seeds_list:
+            cfg = copy.deepcopy(config_before_hpo)
+            cfg.set('random_state', seed)
+            cfg.set('hpo.sampler_seed', seed)
 
-    hpo_summaries = _run_hpo_for_config(
-        config,
-        args,
-        X_train=X_train,
-        y_train=y_train,
-        X_val=X_val,
-        y_val=y_val,
-        feature_names=feature_names,
-    )
+            seed_dir = output_dir / f'seed_{seed}'
+            exp_name = f'benchmark_{timestamp}_seed_{seed}'
+            benchmark, drift_benchmark, drift_protocol_note, _fn = (
+                _run_single_benchmark_pipeline(
+                    cfg=cfg,
+                    config_before_hpo=config_before_hpo,
+                    args=args,
+                    data_splits=data_splits,
+                    output_dir=seed_dir,
+                    timestamp=timestamp,
+                    experiment_name=exp_name,
+                    statistics_random_state=seed,
+                    compute_statistics=False,
+                    include_concept_drift=False,
+                )
+            )
+            per_seed_metric_rows.extend(extract_per_seed_rows(benchmark, seed=seed))
 
-    summary_path = output_dir / "hpo_summary.json"
-    summary_path.write_text(
-        json.dumps(
-            {"schema_version": "HPOSummaryV1", "models": hpo_summaries},
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    print(f"\nHPO summary written to: {summary_path}")
+            run_ctx_seed = BenchmarkRunContext(
+                argv=list(sys.argv[1:]),
+                args=vars(args).copy(),
+                config_path=config_path,
+                repo_root=REPO_ROOT,
+                data_dir=TWIBOT20_DATA_DIR,
+                output_dir=seed_dir,
+                explainability=explainability_audit,
+            )
+            save_final_outputs(
+                benchmark,
+                seed_dir,
+                cfg,
+                run_ctx_seed,
+                threshold_analysis_enabled=args.threshold_analysis,
+                threshold_precision_floor=args.threshold_precision_floor,
+                drift_benchmark=drift_benchmark,
+                drift_protocol_note=drift_protocol_note,
+            )
 
-    models = create_models(config)
+        write_multi_seed_outputs(per_seed_metric_rows, output_dir)
 
-    benchmark = ModelBenchmark(
-        models=models,
-        experiment_name=f'benchmark_{timestamp}'
-    )
-    benchmark.hpo_audit_by_model = hpo_summaries
-    if hasattr(benchmark, "set_test_metadata"):
-        benchmark.set_test_metadata(test_metadata)
-
-    benchmark.run_benchmark(
-        X_train, y_train,
-        X_val, y_val,
-        X_test, y_test,
-        feature_names=feature_names,
-        verbose=True,
-        compute_statistics=not args.skip_statistics,
-        statistics_bootstrap_samples=args.statistics_bootstrap_samples,
-        include_mcnemar=not args.skip_mcnemar,
-        enable_scaling=config.get('preprocessing.scale_features'),
-    )
-
-    benchmark.print_summary()
-
-    drift_benchmark = None
-    drift_protocol_note = ""
-    if config.get('concept_drift.enabled'):
-        drift_cfg = copy.deepcopy(config)
-        _reset_model_params_to_base(drift_cfg, config_before_hpo)
-        temporal = build_temporal_split_dict(
-            data_splits,
-            val_size=float(drift_cfg.get('concept_drift.val_size', 0.2)),
-            test_size=float(drift_cfg.get('concept_drift.test_size', 0.1)),
-            time_col=str(drift_cfg.get('concept_drift.time_col', 'account_creation_date')),
-            random_state=int(drift_cfg.get('random_state', 2112)),
-            min_samples_per_split=int(drift_cfg.get('concept_drift.min_samples_per_split', 1)),
+        parent_ctx = BenchmarkRunContext(
+            argv=list(sys.argv[1:]),
+            args=vars(args).copy(),
+            config_path=config_path,
+            repo_root=REPO_ROOT,
+            data_dir=TWIBOT20_DATA_DIR,
+            output_dir=output_dir,
+            explainability=explainability_audit,
         )
-        drift_protocol_note = format_protocol_note(
-            temporal['train'],
-            temporal['val'],
-            temporal['test'],
-            time_col=str(drift_cfg.get('concept_drift.time_col', 'account_creation_date')),
-            reference_date_policy=str(
-                drift_cfg.get('concept_drift.reference_date_policy', 'dataset_observation_anchor')
-            ),
-        )
-        prepared_drift = prepare_data(
-            temporal,
-            drift_cfg,
-            return_metadata=False,
-            temporal_protocol=True,
-        )
-        Xd_tr, Xd_va, Xd_te, yd_tr, yd_va, yd_te, fd_names = prepared_drift
-        hpo_drift = _run_hpo_for_config(
-            drift_cfg,
-            args,
-            X_train=Xd_tr,
-            y_train=yd_tr,
-            X_val=Xd_va,
-            y_val=yd_va,
-            feature_names=fd_names,
-        )
-        models_drift = create_models(drift_cfg)
-        drift_benchmark = ModelBenchmark(
-            models=models_drift,
-            experiment_name=f'benchmark_{timestamp}_concept_drift'
-        )
-        drift_benchmark.hpo_audit_by_model = hpo_drift
-        drift_benchmark.run_benchmark(
-            Xd_tr, yd_tr,
-            Xd_va, yd_va,
-            Xd_te, yd_te,
-            feature_names=fd_names,
-            verbose=True,
+        meta_path = write_run_metadata(parent_ctx)
+        print(f"Saved aggregate run metadata to {meta_path}")
+        print(f"Multi-seed summary: {output_dir / 'multi_seed_summary.md'}")
+
+        print("\n" + "="*60)
+        print("BENCHMARK COMPLETE (multi-seed)")
+        print("="*60)
+        print(f"Results saved under: {output_dir}")
+        return benchmark
+
+    # Single-seed path
+    rs = int(config.get('random_state', 2112))
+    benchmark, drift_benchmark, drift_protocol_note, feature_names = (
+        _run_single_benchmark_pipeline(
+            cfg=config,
+            config_before_hpo=config_before_hpo,
+            args=args,
+            data_splits=data_splits,
+            output_dir=output_dir,
+            timestamp=timestamp,
+            experiment_name=f'benchmark_{timestamp}',
+            statistics_random_state=rs,
             compute_statistics=not args.skip_statistics,
-            statistics_bootstrap_samples=args.statistics_bootstrap_samples,
-            include_mcnemar=not args.skip_mcnemar,
-            enable_scaling=drift_cfg.get('preprocessing.scale_features'),
+            include_concept_drift=True,
         )
-        drift_benchmark.print_summary()
+    )
 
     skip_slow_aux = args.dissertation_core
 
@@ -505,7 +659,6 @@ def main():
             output_dir,
         )
 
-    config_path = str(Path(args.config).resolve()) if args.config else None
     run_context = BenchmarkRunContext(
         argv=list(sys.argv[1:]),
         args=vars(args).copy(),

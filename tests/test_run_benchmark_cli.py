@@ -8,6 +8,8 @@ from unittest import mock
 
 import numpy as np
 
+from benchmarking import ModelBenchmark
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -22,6 +24,9 @@ class _BenchmarkStub:
         return {}
 
     def print_summary(self):
+        return None
+
+    def set_test_metadata(self, *_a, **_k):
         return None
 
     def get_best_model(self, metric):
@@ -233,9 +238,8 @@ class RunBenchmarkCliTest(unittest.TestCase):
             class _StubWithDrift(_BenchmarkStub):
                 def run_benchmark(self, *args, **kwargs):
                     return {}
+
                 def print_summary(self):
-                    return None
-                def set_test_metadata(self, *_a, **_k):
                     return None
 
             calls = {"n": 0}
@@ -290,6 +294,95 @@ class RunBenchmarkCliTest(unittest.TestCase):
 
             self.assertEqual(calls["n"], 2)
             self.assertIsNotNone(wrote["drift"])
+
+    def test_seeds_fewer_than_three_errors(self):
+        with self.assertRaises(SystemExit):
+            self._run_main("--seeds", "1", "2")
+
+    def test_seeds_duplicate_errors(self):
+        with self.assertRaises(SystemExit):
+            self._run_main("--seeds", "10", "20", "10")
+
+    def test_seeds_runs_three_pipelines_writes_aggregate(self):
+        wrote_rows = []
+
+        def capture_write(rows, parent):
+            wrote_rows.append((list(rows), Path(parent)))
+
+        pipeline_calls = []
+
+        def fake_pipeline(*, cfg, statistics_random_state, **kwargs):
+            pipeline_calls.append(
+                (
+                    statistics_random_state,
+                    int(cfg.get("random_state", -1)),
+                    int(cfg.get("hpo.sampler_seed", -1)),
+                )
+            )
+            bm = ModelBenchmark(models={}, experiment_name="stub")
+
+            bm.results = {
+                "logistic_regression": {
+                    "test_metrics": {
+                        "f1_macro": float(statistics_random_state) / 10000.0,
+                        "pr_auc": 0.5,
+                        "mcc": 0.0,
+                        "balanced_accuracy": 0.5,
+                    }
+                }
+            }
+            return bm, None, "", ["feat_a", "feat_b"]
+
+        parent_output = {}
+
+        def capture_save(bm, od, cfg, ctx, **kwargs):
+            parent_output["dirs"] = parent_output.get("dirs", []) + [Path(od)]
+
+        with TemporaryDirectory(dir=ROOT) as tmp:
+            tmp_path = Path(tmp)
+            argv = [
+                "run_benchmark.py",
+                "--output",
+                str(tmp_path / "results"),
+                "--models",
+                "logistic_regression",
+                "--config",
+                str(self._write_config(tmp_path)),
+                "--seeds",
+                "2114",
+                "2112",
+                "2113",
+                "--skip-statistics",
+            ]
+
+            with mock.patch.object(sys, "argv", argv), mock.patch.object(
+                run_benchmark,
+                "load_data",
+                return_value={"train": object(), "val": object(), "test": object()},
+            ), mock.patch.object(
+                run_benchmark,
+                "_run_single_benchmark_pipeline",
+                side_effect=fake_pipeline,
+            ), mock.patch.object(
+                run_benchmark,
+                "save_final_outputs",
+                side_effect=capture_save,
+            ), mock.patch.object(
+                run_benchmark,
+                "write_multi_seed_outputs",
+                side_effect=capture_write,
+            ), mock.patch.object(run_benchmark, "write_run_metadata", return_value=tmp_path):
+                run_benchmark.main()
+
+        self.assertEqual(len(pipeline_calls), 3)
+        self.assertEqual(
+            {(c[1], c[2]) for c in pipeline_calls},
+            {(2112, 2112), (2113, 2113), (2114, 2114)},
+        )
+        self.assertEqual(len(parent_output["dirs"]), 3)
+        self.assertTrue(all("seed_" in str(p) for p in parent_output["dirs"]))
+        self.assertEqual(len(wrote_rows), 1)
+        self.assertGreaterEqual(len(wrote_rows[0][0]), 3)
 
 
 if __name__ == "__main__":

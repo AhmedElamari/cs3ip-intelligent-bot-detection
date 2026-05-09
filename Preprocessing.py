@@ -1,3 +1,5 @@
+import functools
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
@@ -5,8 +7,9 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif
 
 
 class BotDetector:
-    def __init__(self):
+    def __init__(self, random_state: int = 2112):
         """Initialize preprocessing helpers."""
+        self.random_state = int(random_state)
         self.data = None
         self.scaler = StandardScaler()
         self.selected_features = None
@@ -47,17 +50,19 @@ class BotDetector:
                 return X_train, y_train
         return X_train, y_train
 
-    @staticmethod
-    def _fit_resample(resampler_cls, X_train, y_train):
+    def _fit_resample(self, resampler_cls, X_train, y_train):
         """Build a resampler and apply it to training data."""
-        resampler = resampler_cls(random_state=2112)
+        resampler = resampler_cls(random_state=self.random_state)
         return resampler.fit_resample(X_train, y_train)
 
     def select_features(self, X_train, y_train, k: int = 20):
         """Select top k features using mutual information"""
         # Ensure k does not exceed number of features
         k = min(k, X_train.shape[1])
-        self.feature_selector = SelectKBest(mutual_info_classif, k=k)
+        score_fn = functools.partial(
+            mutual_info_classif, random_state=self.random_state
+        )
+        self.feature_selector = SelectKBest(score_fn, k=k)
         X_selected = self.feature_selector.fit_transform(X_train, y_train)
         self.selected_features = self.feature_selector.get_support(indices=True)
         return X_selected
