@@ -13,6 +13,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
+- **Multi-seed benchmark** (`--seeds`): optional independent retraining across ≥3 seeds with mean ± std summaries for Macro-F1, PR-AUC, MCC, and balanced accuracy
 - Optional validation-selected threshold analysis for precision-recall operating-point audits
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
 - Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop on true bots, full-test-set Macro-F1 / PR-AUC degradation per profile, and dissertation figures (`robustness_profile_degradation.png`, feature vulnerability table/chart)
@@ -93,6 +94,14 @@ Recommended **dissertation core** run (full HPO, **every** model from config whe
 ```bash
 python run_benchmark.py --dissertation-core
 ```
+**Multi-seed retraining** (≥3 unique integers): retrains independently per seed so you can report mean ± sample standard deviation for test-set Macro-F1, PR-AUC, MCC, and balanced accuracy across training randomness (distinct from bootstrap CIs, which reflect test-set resampling for a single run). Example after tuning or with cache hits:
+```bash
+python run_benchmark.py --dissertation-core --no-tune --models random_forest xgboost --seeds 2112 4223 8337
+```
+- Parent directory receives `multi_seed_results.csv`, `multi_seed_summary.csv`, `multi_seed_summary.md`, and `run_metadata.json`.
+- Full per-seed bundles (CSV/JSON/scoreboards, etc.) live under `seed_<seed>/`.
+- Explainability and robustness are disabled for multi-seed runs; the chronological concept-drift second benchmark (`--time-stratified-results`) is skipped. Per-seed bootstrap CIs and McNemar are always off in multi-seed mode (only the multi-seed mean ± std summary is produced at the parent).
+
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/dissertation_scoreboard.csv`, `dissertation_scoreboard.md`, and `dissertation_scoreboard.tex` — dissertation Table 8.2 style baseline scoreboard (F1-macro / F1-weighted, PR-AUC, MCC, balanced accuracy; Markdown/LaTeX bold best column values)
@@ -156,6 +165,7 @@ Options:
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
 - `--frs-model`, `--frs-shap-top-k`, `--frs-ablation-top-ks`: applied when robustness is enabled (CLI or `robustness.enabled: true` in config); tune FRS / SHAP stability / ablation for that run
+- `--seeds INT [INT ...]`: multi-seed mode (minimum three unique integers); see dissertation-core section above
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
