@@ -8,10 +8,10 @@ from unittest import mock
 
 import numpy as np
 
-from benchmarking import ModelBenchmark
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from benchmarking import ModelBenchmark
 
 import run_benchmark
 

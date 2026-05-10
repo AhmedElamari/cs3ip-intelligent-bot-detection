@@ -300,7 +300,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help=(
             'Run N independent training seeds (≥3 unique integers). Each seed writes outputs under '
             '`seed_<seed>/`; parent directory gets multi_seed_results/summary. Skips XAI, robustness, '
-            'and concept-drift second benchmark; per-seed bootstrap stats are off by default.'
+            'and concept-drift second benchmark; per-seed bootstrap CIs and McNemar are always disabled.'
         ),
     )
     parser.add_argument(

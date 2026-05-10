@@ -96,11 +96,11 @@ python run_benchmark.py --dissertation-core
 ```
 **Multi-seed retraining** (≥3 unique integers): retrains independently per seed so you can report mean ± sample standard deviation for test-set Macro-F1, PR-AUC, MCC, and balanced accuracy across training randomness (distinct from bootstrap CIs, which reflect test-set resampling for a single run). Example after tuning or with cache hits:
 ```bash
-python run_benchmark.py --dissertation-core --no-tune --models random_forest xgboost --seeds 2112 4223 8337 --skip-statistics
+python run_benchmark.py --dissertation-core --no-tune --models random_forest xgboost --seeds 2112 4223 8337
 ```
 - Parent directory receives `multi_seed_results.csv`, `multi_seed_summary.csv`, `multi_seed_summary.md`, and `run_metadata.json`.
 - Full per-seed bundles (CSV/JSON/scoreboards, etc.) live under `seed_<seed>/`.
-- Explainability and robustness are disabled for multi-seed runs; the chronological concept-drift second benchmark (`--time-stratified-results`) is skipped. Per-seed bootstrap statistics default off (pass `--skip-statistics` explicitly for clarity).
+- Explainability and robustness are disabled for multi-seed runs; the chronological concept-drift second benchmark (`--time-stratified-results`) is skipped. Per-seed bootstrap CIs and McNemar are always off in multi-seed mode (only the multi-seed mean ± std summary is produced at the parent).
 
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
