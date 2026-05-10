@@ -138,7 +138,7 @@ def prepare_data(
 
     # Preprocessing on each split
     print("\nPreprocessing...")
-    detector = BotDetector()
+    detector = BotDetector(random_state=int(config.get("random_state", 2112)))
 
     train_df = preprocess_split(detector, train_df)
     val_df = preprocess_split(detector, val_df)
