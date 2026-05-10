@@ -25,8 +25,6 @@ class PreprocessingTest(unittest.TestCase):
 
     def test_fit_resample_passes_random_state_to_resampler(self):
         """Resampler constructor receives BotDetector.random_state."""
-        from unittest.mock import MagicMock
-
         det = self.BotDetector(random_state=42)
         mock_cls = MagicMock()
         mock_inst = MagicMock()

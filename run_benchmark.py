@@ -433,6 +433,11 @@ def _apply_config_from_args(parser: argparse.ArgumentParser, args: argparse.Name
         config.set('output.save_plots', False)
         config.set('robustness.enabled', False)
 
+    if args.seeds is not None:
+        args.explain = False
+        args.robustness_analysis = False
+        config.set('robustness.enabled', False)
+
     if args.smote:
         config.set('preprocessing.handle_imbalance', True)
         config.set('preprocessing.imbalance_method', 'smote')
@@ -483,11 +488,6 @@ def _apply_config_from_args(parser: argparse.ArgumentParser, args: argparse.Name
     if args.time_stratified_results:
         config.set('concept_drift.enabled', True)
 
-    if args.seeds is not None:
-        args.explain = False
-        args.robustness_analysis = False
-        config.set('robustness.enabled', False)
-
     return config
 
 
@@ -504,6 +504,8 @@ def main():
             seeds_list = validate_seeds(args.seeds)
         except (ValueError, TypeError) as exc:
             parser.error(str(exc))
+    if seeds_list:
+        seeds_list.sort()
 
     config = _apply_config_from_args(parser, args)
     config_before_hpo = copy.deepcopy(config)
@@ -549,7 +551,6 @@ def main():
     print(f"Explainability: {state} (source: {explainability_audit['xai_effective_source']})")
 
     if seeds_list:
-        seeds_list.sort()
         if config.get('concept_drift.enabled'):
             print(
                 "\n[Note] Concept drift / --time-stratified second benchmark is skipped in multi-seed mode."
