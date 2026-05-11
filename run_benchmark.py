@@ -13,11 +13,13 @@ import argparse
 import copy
 import json
 import sys
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from sklearn.utils.class_weight import compute_class_weight
 
 from config import Config, load_config
@@ -26,6 +28,7 @@ from benchmarking.data_prep import load_data, prepare_data
 from benchmarking.model_factory import create_models
 from benchmarking.multi_seed import (
     extract_per_seed_rows,
+    run_multi_seed_retraining,
     validate_seeds,
     write_multi_seed_outputs,
 )
@@ -42,6 +45,19 @@ from benchmarking.hpo.service import (
 
 REPO_ROOT = Path(__file__).resolve().parent
 TWIBOT20_DATA_DIR = REPO_ROOT / "data"
+
+
+class _StageSplit:
+    __slots__ = ("_last", "stages")
+
+    def __init__(self, start: float) -> None:
+        self._last = start
+        self.stages: dict[str, float] = {}
+
+    def split(self, name: str) -> None:
+        now = time.perf_counter()
+        self.stages[name] = now - self._last
+        self._last = now
 
 
 def _balanced_class_weights(y: np.ndarray) -> dict[int, float]:
@@ -111,7 +127,19 @@ def _run_single_benchmark_pipeline(
     statistics_random_state: int,
     compute_statistics: bool,
     include_concept_drift: bool,
-) -> Tuple[ModelBenchmark, Optional[ModelBenchmark], str, list[str]]:
+) -> Tuple[
+    ModelBenchmark,
+    Optional[ModelBenchmark],
+    str,
+    list[str],
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    pd.DataFrame | None,
+]:
     """Prepare data, HPO, train models, optional concept-drift benchmark. Writes hpo_summary.json."""
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -233,7 +261,19 @@ def _run_single_benchmark_pipeline(
         )
         drift_benchmark.print_summary()
 
-    return benchmark, drift_benchmark, drift_protocol_note, list(feature_names)
+    return (
+        benchmark,
+        drift_benchmark,
+        drift_protocol_note,
+        list(feature_names),
+        X_train,
+        X_val,
+        X_test,
+        y_train,
+        y_val,
+        y_test,
+        test_metadata,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -392,6 +432,27 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        '--multi-seed-retraining',
+        action='store_true',
+        help=(
+            'Retrain top scoreboard models across multiple seeds; writes '
+            'multi_seed_retraining.* artifacts (does not rerun HPO per seed).'
+        ),
+    )
+    parser.add_argument(
+        '--multi-seed-values',
+        type=int,
+        nargs='+',
+        default=None,
+        help='Seeds for --multi-seed-retraining (default: config reproducibility.multi_seed.seeds)',
+    )
+    parser.add_argument(
+        '--multi-seed-top-k',
+        type=int,
+        default=None,
+        help='Top-K scoreboard models to retrain (default: config reproducibility.multi_seed.top_k)',
+    )
+    parser.add_argument(
         '--scoreboard-only',
         dest='dissertation_core',
         action='store_true',
@@ -492,6 +553,10 @@ def _apply_config_from_args(parser: argparse.ArgumentParser, args: argparse.Name
 
 
 def main():
+    run_start = time.perf_counter()
+    started_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    stages = _StageSplit(run_start)
+
     parser = _build_parser()
     args = parser.parse_args()
 
@@ -506,6 +571,9 @@ def main():
             parser.error(str(exc))
     if seeds_list:
         seeds_list.sort()
+
+    if seeds_list and args.multi_seed_retraining:
+        parser.error("Cannot combine --seeds with --multi-seed-retraining")
 
     config = _apply_config_from_args(parser, args)
     config_before_hpo = copy.deepcopy(config)
@@ -560,6 +628,8 @@ def main():
     config_path = str(Path(args.config).resolve()) if args.config else None
 
     if seeds_list:
+        stages.split("preamble")
+
         per_seed_metric_rows = []
         for seed in seeds_list:
             cfg = copy.deepcopy(config_before_hpo)
@@ -568,7 +638,10 @@ def main():
 
             seed_dir = output_dir / f'seed_{seed}'
             exp_name = f'benchmark_{timestamp}_seed_{seed}'
-            benchmark, drift_benchmark, drift_protocol_note, _fn = (
+            seed_run_start = time.perf_counter()
+            seed_started_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            seed_stages = _StageSplit(seed_run_start)
+            benchmark, drift_benchmark, drift_protocol_note, _, *_ = (
                 _run_single_benchmark_pipeline(
                     cfg=cfg,
                     config_before_hpo=config_before_hpo,
@@ -582,6 +655,7 @@ def main():
                     include_concept_drift=False,
                 )
             )
+            seed_stages.split("hpo_and_benchmark")
             per_seed_metric_rows.extend(extract_per_seed_rows(benchmark, seed=seed))
 
             run_ctx_seed = BenchmarkRunContext(
@@ -592,6 +666,13 @@ def main():
                 data_dir=TWIBOT20_DATA_DIR,
                 output_dir=seed_dir,
                 explainability=explainability_audit,
+                script_path=Path(__file__).resolve(),
+                cwd=Path.cwd(),
+                runtime={
+                    "started_at_utc": seed_started_utc,
+                    "stages": dict(seed_stages.stages),
+                },
+                run_start_perf=seed_run_start,
             )
             save_final_outputs(
                 benchmark,
@@ -604,7 +685,11 @@ def main():
                 drift_protocol_note=drift_protocol_note,
             )
 
+        stages.split("per_seed_runs")
+
         write_multi_seed_outputs(per_seed_metric_rows, output_dir)
+
+        stages.split("multi_seed_summary")
 
         parent_ctx = BenchmarkRunContext(
             argv=list(sys.argv[1:]),
@@ -614,6 +699,13 @@ def main():
             data_dir=TWIBOT20_DATA_DIR,
             output_dir=output_dir,
             explainability=explainability_audit,
+            script_path=Path(__file__).resolve(),
+            cwd=Path.cwd(),
+            runtime={
+                "started_at_utc": started_utc,
+                "stages": dict(stages.stages),
+            },
+            run_start_perf=run_start,
         )
         meta_path = write_run_metadata(parent_ctx)
         print(f"Saved aggregate run metadata to {meta_path}")
@@ -627,20 +719,62 @@ def main():
 
     # Single-seed path
     rs = int(config.get('random_state', 2112))
-    benchmark, drift_benchmark, drift_protocol_note, feature_names = (
-        _run_single_benchmark_pipeline(
-            cfg=config,
-            config_before_hpo=config_before_hpo,
-            args=args,
-            data_splits=data_splits,
-            output_dir=output_dir,
-            timestamp=timestamp,
-            experiment_name=f'benchmark_{timestamp}',
-            statistics_random_state=rs,
-            compute_statistics=not args.skip_statistics,
-            include_concept_drift=True,
-        )
+    (
+        benchmark,
+        drift_benchmark,
+        drift_protocol_note,
+        feature_names,
+        X_train,
+        X_val,
+        X_test,
+        y_train,
+        y_val,
+        y_test,
+        test_metadata,
+    ) = _run_single_benchmark_pipeline(
+        cfg=config,
+        config_before_hpo=config_before_hpo,
+        args=args,
+        data_splits=data_splits,
+        output_dir=output_dir,
+        timestamp=timestamp,
+        experiment_name=f'benchmark_{timestamp}',
+        statistics_random_state=rs,
+        compute_statistics=not args.skip_statistics,
+        include_concept_drift=True,
     )
+
+    stages.split("benchmark_pipeline")
+
+    multi_payload = None
+    if args.multi_seed_retraining:
+        seeds_ms = (
+            [int(x) for x in args.multi_seed_values]
+            if args.multi_seed_values is not None
+            else [int(x) for x in config.get("reproducibility.multi_seed.seeds", [])]
+        )
+        top_k_ms = (
+            int(args.multi_seed_top_k)
+            if args.multi_seed_top_k is not None
+            else int(config.get("reproducibility.multi_seed.top_k", 3))
+        )
+        multi_payload = run_multi_seed_retraining(
+            benchmark=benchmark,
+            config=config,
+            X_train=X_train,
+            y_train=y_train,
+            X_val=X_val,
+            y_val=y_val,
+            X_test=X_test,
+            y_test=y_test,
+            feature_names=feature_names,
+            output_dir=output_dir,
+            seeds=seeds_ms,
+            top_k=top_k_ms,
+            enable_scaling=config.get('preprocessing.scale_features'),
+            test_metadata=test_metadata,
+        )
+        stages.split("multi_seed_retraining")
 
     skip_slow_aux = args.dissertation_core
 
@@ -651,6 +785,7 @@ def main():
             config,
             output_dir
         )
+        stages.split("explainability")
 
     if not skip_slow_aux and config.get('robustness.enabled'):
         run_robustness_analysis(
@@ -659,6 +794,7 @@ def main():
             config,
             output_dir,
         )
+        stages.split("robustness")
 
     run_context = BenchmarkRunContext(
         argv=list(sys.argv[1:]),
@@ -668,6 +804,14 @@ def main():
         data_dir=TWIBOT20_DATA_DIR,
         output_dir=output_dir,
         explainability=explainability_audit,
+        script_path=Path(__file__).resolve(),
+        cwd=Path.cwd(),
+        runtime={
+            "started_at_utc": started_utc,
+            "stages": dict(stages.stages),
+        },
+        run_start_perf=run_start,
+        multi_seed_summary=multi_payload,
     )
 
     save_final_outputs(
