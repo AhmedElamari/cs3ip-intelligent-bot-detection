@@ -184,12 +184,19 @@ class ModelBenchmark:
             ):
                 feature_importance = model.get_feature_importance()
 
+            runtime_metadata = None
+            if hasattr(model, "get_runtime_metadata") and callable(
+                getattr(model, "get_runtime_metadata")
+            ):
+                runtime_metadata = model.get_runtime_metadata()
+
             self.results[name] = {
                 "model": model,
                 "training_time": training_time,
                 "val_metrics": val_metrics,
                 "test_metrics": test_metrics,
                 "feature_importance": feature_importance,
+                "runtime_metadata": runtime_metadata,
                 "is_interpretable": (
                     model.is_interpretable if hasattr(model, "is_interpretable") else False
                 ),
@@ -858,5 +865,8 @@ class ModelBenchmark:
             }
             if name in self.hpo_audit_by_model:
                 entry["hpo"] = self.hpo_audit_by_model[name]
+            rmeta = result.get("runtime_metadata")
+            if rmeta:
+                entry["runtime_metadata"] = rmeta
             payload["models"][name] = entry
         return payload
