@@ -331,7 +331,7 @@ class RunBenchmarkCliTest(unittest.TestCase):
                     }
                 }
             }
-            return bm, None, "", ["feat_a", "feat_b"]
+            return bm, None, "", ["feat_a", "feat_b"], None, None, None, None, None, None, None
 
         parent_output = {}
 
