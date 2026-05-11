@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 import numpy as np
+import pandas as pd
 from sklearn.utils.class_weight import compute_class_weight
 
 from config import Config, load_config
@@ -137,7 +138,7 @@ def _run_single_benchmark_pipeline(
     np.ndarray,
     np.ndarray,
     np.ndarray,
-    Any,
+    pd.DataFrame | None,
 ]:
     """Prepare data, HPO, train models, optional concept-drift benchmark. Writes hpo_summary.json."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -635,23 +636,19 @@ def main():
 
             seed_dir = output_dir / f'seed_{seed}'
             exp_name = f'benchmark_{timestamp}_seed_{seed}'
-            (
-                benchmark,
-                drift_benchmark,
-                drift_protocol_note,
-                _feature_names_seed,
-                *_unused_splits,
-            ) = _run_single_benchmark_pipeline(
-                cfg=cfg,
-                config_before_hpo=config_before_hpo,
-                args=args,
-                data_splits=data_splits,
-                output_dir=seed_dir,
-                timestamp=timestamp,
-                experiment_name=exp_name,
-                statistics_random_state=seed,
-                compute_statistics=False,
-                include_concept_drift=False,
+            benchmark, drift_benchmark, drift_protocol_note, _, *_ = (
+                _run_single_benchmark_pipeline(
+                    cfg=cfg,
+                    config_before_hpo=config_before_hpo,
+                    args=args,
+                    data_splits=data_splits,
+                    output_dir=seed_dir,
+                    timestamp=timestamp,
+                    experiment_name=exp_name,
+                    statistics_random_state=seed,
+                    compute_statistics=False,
+                    include_concept_drift=False,
+                )
             )
             per_seed_metric_rows.extend(extract_per_seed_rows(benchmark, seed=seed))
 

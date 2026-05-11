@@ -153,7 +153,7 @@ def run_multi_seed_retraining(
     y_val: np.ndarray,
     X_test: np.ndarray,
     y_test: np.ndarray,
-    feature_names: list,
+    feature_names: list[str],
     output_dir: Path,
     seeds: list[int],
     top_k: int,
@@ -191,7 +191,7 @@ def run_multi_seed_retraining(
             models=models,
             experiment_name=f"multi_seed_{seed}",
         )
-        if test_metadata is not None and hasattr(mb, "set_test_metadata"):
+        if test_metadata is not None:
             mb.set_test_metadata(test_metadata)
         mb.run_benchmark(
             X_train,
