@@ -628,6 +628,8 @@ def main():
     config_path = str(Path(args.config).resolve()) if args.config else None
 
     if seeds_list:
+        stages.split("preamble")
+
         per_seed_metric_rows = []
         for seed in seeds_list:
             cfg = copy.deepcopy(config_before_hpo)
@@ -636,6 +638,9 @@ def main():
 
             seed_dir = output_dir / f'seed_{seed}'
             exp_name = f'benchmark_{timestamp}_seed_{seed}'
+            seed_run_start = time.perf_counter()
+            seed_started_utc = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+            seed_stages = _StageSplit(seed_run_start)
             benchmark, drift_benchmark, drift_protocol_note, _, *_ = (
                 _run_single_benchmark_pipeline(
                     cfg=cfg,
@@ -650,6 +655,7 @@ def main():
                     include_concept_drift=False,
                 )
             )
+            seed_stages.split("hpo_and_benchmark")
             per_seed_metric_rows.extend(extract_per_seed_rows(benchmark, seed=seed))
 
             run_ctx_seed = BenchmarkRunContext(
@@ -660,6 +666,13 @@ def main():
                 data_dir=TWIBOT20_DATA_DIR,
                 output_dir=seed_dir,
                 explainability=explainability_audit,
+                script_path=Path(__file__).resolve(),
+                cwd=Path.cwd(),
+                runtime={
+                    "started_at_utc": seed_started_utc,
+                    "stages": dict(seed_stages.stages),
+                },
+                run_start_perf=seed_run_start,
             )
             save_final_outputs(
                 benchmark,
@@ -672,7 +685,11 @@ def main():
                 drift_protocol_note=drift_protocol_note,
             )
 
+        stages.split("per_seed_runs")
+
         write_multi_seed_outputs(per_seed_metric_rows, output_dir)
+
+        stages.split("multi_seed_summary")
 
         parent_ctx = BenchmarkRunContext(
             argv=list(sys.argv[1:]),
@@ -682,6 +699,13 @@ def main():
             data_dir=TWIBOT20_DATA_DIR,
             output_dir=output_dir,
             explainability=explainability_audit,
+            script_path=Path(__file__).resolve(),
+            cwd=Path.cwd(),
+            runtime={
+                "started_at_utc": started_utc,
+                "stages": dict(stages.stages),
+            },
+            run_start_perf=run_start,
         )
         meta_path = write_run_metadata(parent_ctx)
         print(f"Saved aggregate run metadata to {meta_path}")
