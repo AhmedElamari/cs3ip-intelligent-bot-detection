@@ -1,7 +1,9 @@
 import importlib.util
 import sys
 import unittest
+from functools import partial
 from pathlib import Path
+from unittest.mock import MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -18,7 +20,33 @@ class PreprocessingTest(unittest.TestCase):
         import numpy as np
         from Preprocessing import BotDetector
         self.np = np
+        self.BotDetector = BotDetector
         self.detector = BotDetector()
+
+    def test_fit_resample_passes_random_state_to_resampler(self):
+        """Resampler constructor receives BotDetector.random_state."""
+        det = self.BotDetector(random_state=42)
+        mock_cls = MagicMock()
+        mock_inst = MagicMock()
+        mock_inst.fit_resample.return_value = ([], [])
+        mock_cls.return_value = mock_inst
+        X = self.np.zeros((2, 1))
+        y = self.np.array([0, 1])
+        det._fit_resample(mock_cls, X, y)
+        mock_cls.assert_called_once_with(random_state=42)
+
+    def test_mutual_info_scorer_uses_random_state(self):
+        """SelectKBest score function is partial(mutual_info_classif, random_state=...)."""
+        from sklearn.feature_selection import mutual_info_classif
+
+        det = self.BotDetector(random_state=4242)
+        X = self.np.random.default_rng(0).random((20, 5))
+        y = self.np.array([0, 1] * 10)
+        det.select_features(X, y, k=3)
+        fn = det.feature_selector.score_func
+        self.assertIsInstance(fn, partial)
+        self.assertIs(fn.func, mutual_info_classif)
+        self.assertEqual(fn.keywords.get("random_state"), 4242)
 
     def test_get_class_weights_with_empty_labels_raises_value_error(self):
         """Verify ValueError is raised when y_train is empty."""

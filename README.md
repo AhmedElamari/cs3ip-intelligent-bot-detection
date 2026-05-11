@@ -13,6 +13,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
+- **Multi-seed benchmark** (`--seeds`): optional independent retraining across ≥3 seeds with mean ± std summaries for Macro-F1, PR-AUC, MCC, and balanced accuracy
 - Optional validation-selected threshold analysis for precision-recall operating-point audits
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
 - Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop on true bots, full-test-set Macro-F1 / PR-AUC degradation per profile, and dissertation figures (`robustness_profile_degradation.png`, feature vulnerability table/chart)
@@ -105,6 +106,16 @@ python run_benchmark.py --dissertation-core
 python run_benchmark.py --dissertation-core --multi-seed-retraining --multi-seed-values 2112 2113 2114 2115 2116
 ```
 
+**Multi-seed training** (`--seeds`, ≥3 unique integers): retrains independently per seed so you can report mean ± sample standard deviation for test-set Macro-F1, PR-AUC, MCC, and balanced accuracy across training randomness (distinct from bootstrap CIs, which reflect test-set resampling for a single run). Example after tuning or with cache hits:
+```bash
+python run_benchmark.py --dissertation-core --no-tune --models random_forest xgboost --seeds 2112 4223 8337
+```
+- Parent directory receives `multi_seed_results.csv`, `multi_seed_summary.csv`, `multi_seed_summary.md`, and `run_metadata.json`.
+- Full per-seed bundles (CSV/JSON/scoreboards, etc.) live under `seed_<seed>/`.
+- Explainability and robustness are disabled for `--seeds` runs; the chronological concept-drift second benchmark (`--time-stratified-results`) is skipped. Per-seed bootstrap CIs and McNemar are always off in that mode (only the multi-seed mean ± std summary is produced at the parent).
+
+`--multi-seed-retraining` instead writes `multi_seed_retraining.csv`, `multi_seed_summary.csv`, and `multi_seed_retraining.json` at the run root after the main scoreboard completes.
+
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/dissertation_scoreboard.csv`, `dissertation_scoreboard.md`, and `dissertation_scoreboard.tex` — dissertation Table 8.2 style baseline scoreboard (F1-macro / F1-weighted, PR-AUC, MCC, balanced accuracy; Markdown/LaTeX bold best column values)
@@ -173,12 +184,13 @@ Options:
 - `--multi-seed-retraining`: after the main benchmark, retrain only the top-K scoreboard models (default K=3 from config) for each `--multi-seed-values` seed without rerunning HPO
 - `--multi-seed-values INT...`: random seeds for those retrains (default in config: 2112–2116)
 - `--multi-seed-top-k INT`: override top-K (default 3)
+- `--seeds INT [INT ...]`: multi-seed mode (minimum three unique integers); see multi-seed training section above
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
 **Metric note:** HPO maximises **validation F1** (`val_f1`). The printed `[BEST]` benchmark line still ranks models by **test F1** (existing `get_best_model('f1')` default).
 
-**Bootstrap vs multi-seed:** metric confidence intervals and pairwise tests use **bootstrap resampling** of predictions from the models trained in that run (not separate retrains). `--multi-seed-retraining` runs **new fits** per seed for the top scoreboard models to report seed-to-seed metric dispersion.
+**Bootstrap vs multi-seed:** metric confidence intervals and pairwise tests use **bootstrap resampling** of predictions from the models trained in that run (not separate retrains). `--seeds` runs a **full** independent benchmark per seed and aggregates mean ± std at the parent. `--multi-seed-retraining` runs **new fits** per seed for only the top scoreboard models to report seed-to-seed metric dispersion without rerunning HPO.
 
 **Threshold note:** `--threshold-analysis` does not retrain models and does not change the headline benchmark ranking. It compares the current `model.predict()` operating point with validation-selected probability thresholds, then reports those thresholds on the held-out test split to diagnose precision-recall trade-offs.
 
