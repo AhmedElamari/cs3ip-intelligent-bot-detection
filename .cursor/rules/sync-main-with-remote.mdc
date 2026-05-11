@@ -1,0 +1,27 @@
+---
+description: Keep local main aligned with origin/main; use the repo git hook and pull before main-line work
+alwaysApply: true
+---
+
+# Sync local `main` with merged PRs
+
+## Why
+
+Forgotten `git pull` on `main` causes confusing drift vs GitHub after PR merges.
+
+## Automation (authoritative)
+
+This repo ships `githooks/post-checkout`. After a **one-time** setup per clone:
+
+`git config core.hooksPath githooks`
+
+…every `git switch main` / `git checkout main` runs `git pull --ff-only origin main` (quiet). If you are offline or `main` diverged, the hook prints a short message instead of merging blindly.
+
+## Agent reminder
+
+When work assumes **current `main`** (release hygiene, branching from main, “is this bug on main?”, CI parity):
+
+1. Confirm branch is `main` (or explicitly note otherwise).
+2. Run `git pull --ff-only origin main` (or `git fetch origin main && git merge --ff-only origin/main`) before conclusions that depend on upstream state.
+
+This does **not** replace fetching other branches or rebasing feature work; it only guards **local main vs origin/main**.

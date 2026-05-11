@@ -1,5 +1,4 @@
 """Output helpers for the benchmark pipeline: comparison tables, plots, and final results."""
-from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
@@ -37,13 +36,13 @@ DRIFT_SCOREBOARD_INTRO = (
 
 def _model_runtime_from_benchmark(benchmark: ModelBenchmark) -> dict[str, Any]:
     out: dict[str, Any] = {}
-    for name, res in getattr(benchmark, "results", {}).items():
+    for name, res in benchmark.results.items():
         model = res.get("model")
-        getter = getattr(model, "get_runtime_metadata", None) if model is not None else None
-        if callable(getter):
-            meta = getter()
+        get_rt = getattr(model, "get_runtime_metadata", None) if model is not None else None
+        if callable(get_rt):
+            meta = get_rt()
             if meta:
-                out[str(name)] = meta
+                out[name] = meta
     return out
 
 

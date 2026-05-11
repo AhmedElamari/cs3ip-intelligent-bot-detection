@@ -185,10 +185,9 @@ class ModelBenchmark:
                 feature_importance = model.get_feature_importance()
 
             runtime_metadata = None
-            if hasattr(model, "get_runtime_metadata") and callable(
-                getattr(model, "get_runtime_metadata")
-            ):
-                runtime_metadata = model.get_runtime_metadata()
+            get_rt = getattr(model, "get_runtime_metadata", None)
+            if callable(get_rt):
+                runtime_metadata = get_rt()
 
             self.results[name] = {
                 "model": model,
