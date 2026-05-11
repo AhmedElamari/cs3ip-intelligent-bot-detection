@@ -128,7 +128,7 @@ def _hardware_metadata() -> dict[str, Any]:
         "warnings": warnings,
     }
     try:
-        import psutil  # type: ignore[import-untyped]
+        import psutil
 
         out["memory_total_bytes"] = int(psutil.virtual_memory().total)
     except ImportError:
