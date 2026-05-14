@@ -1,3 +1,0 @@
-model,profile,attacked_true_bots,baseline_detected_bots,skip_reason,flips_to_human,flip_rate,confidence_drop_mean,confidence_drop_median,confidence_drop_std,confidence_drop_non_flip_mean,mean_rank_stability
-random_forest,cheap_only,640,620,,7,0.01129032258064516,0.020899635043964134,0.016821890612980006,0.04736627634142458,0.020478581624123283,0.9648521739130435
-random_forest,realistic_mixed,640,620,,6,0.00967741935483871,0.02369663309914889,0.018872382867339055,0.04860423717292518,0.023456793535696848,0.9626956521739128
