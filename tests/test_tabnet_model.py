@@ -202,6 +202,14 @@ class TabNetModelTest(unittest.TestCase):
         model = self._make_fitted()
         self.assertTrue(model.is_fitted)
 
+    def test_runtime_metadata_after_fit(self):
+        model = self._make_fitted()
+        meta = model.get_runtime_metadata()
+        self.assertIsInstance(meta, dict)
+        self.assertIn("requested_device", meta)
+        self.assertIn("actual_device", meta)
+        self.assertIsInstance(meta.get("cuda_available"), bool)
+
     def test_predict_returns_binary(self):
         model = self._make_fitted()
         preds = model.predict(self.X)
