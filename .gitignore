@@ -26,3 +26,8 @@ tasks/
 debug-*.log
 Archive_results/
 
+.gitlab-ci.yml
+CITATION.cff
+LICENSE
+main_repro_appendix_working.tex
+.cursor/rules
