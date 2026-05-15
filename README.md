@@ -13,6 +13,7 @@ This project implements an interpretable bot detection pipeline for social media
 - Benchmarking with comparison tables, plots, and statistically grounded evaluation
 - Bootstrap 95% confidence intervals per model metric
 - Pairwise model significance: paired bootstrap delta test + McNemar exact test (Holm-Bonferroni corrected)
+- **Multi-seed benchmark** (`--seeds`): optional independent retraining across ≥3 seeds with mean ± std summaries for Macro-F1, PR-AUC, MCC, and balanced accuracy
 - Optional validation-selected threshold analysis for precision-recall operating-point audits
 - Explainability using SHAP (TreeExplainer for XGBoost), LIME, and feature importance analysis
 - Optional cost-aware adversarial robustness audit with flip-rate, confidence-drop on true bots, full-test-set Macro-F1 / PR-AUC degradation per profile, and dissertation figures (`robustness_profile_degradation.png`, feature vulnerability table/chart)
@@ -49,6 +50,12 @@ Optional XAI tooling:
 ```bash
 pip install shap lime matplotlib seaborn
 ```
+
+**Reproducibility:** the repo includes a frozen lockfile from the reference environment:
+```bash
+pip install -r requirements.lock.txt
+```
+`requirements.txt` / `requirements-dl.txt` remain the human-edited dependency intent; each benchmark run also writes a per-run `environment_freeze.txt` (full `pip freeze --all` output) beside `run_metadata.json` with the file’s SHA-256 recorded in metadata.
 
 **Optuna** is included in `requirements.txt` for model HPO. Optional deep-learning profile (TabNet training):
 ```bash
@@ -93,6 +100,22 @@ Recommended **dissertation core** run (full HPO, **every** model from config whe
 ```bash
 python run_benchmark.py --dissertation-core
 ```
+
+**Dissertation reproducibility bundle** — same as dissertation core, plus **true multi-seed retraining** for the top 3 models by the dissertation scoreboard (no per-seed HPO rerun; stability across seeds on the tuned configuration):
+```bash
+python run_benchmark.py --dissertation-core --multi-seed-retraining --multi-seed-values 2112 2113 2114 2115 2116
+```
+
+**Multi-seed training** (`--seeds`, ≥3 unique integers): retrains independently per seed so you can report mean ± sample standard deviation for test-set Macro-F1, PR-AUC, MCC, and balanced accuracy across training randomness (distinct from bootstrap CIs, which reflect test-set resampling for a single run). Example after tuning or with cache hits:
+```bash
+python run_benchmark.py --dissertation-core --no-tune --models random_forest xgboost --seeds 2112 4223 8337
+```
+- Parent directory receives `multi_seed_results.csv`, `multi_seed_summary.csv`, `multi_seed_summary.md`, and `run_metadata.json`.
+- Full per-seed bundles (CSV/JSON/scoreboards, etc.) live under `seed_<seed>/`.
+- Explainability and robustness are disabled for `--seeds` runs; the chronological concept-drift second benchmark (`--time-stratified-results`) is skipped. Per-seed bootstrap CIs and McNemar are always off in that mode (only the multi-seed mean ± std summary is produced at the parent).
+
+`--multi-seed-retraining` instead writes `multi_seed_retraining.csv`, `multi_seed_summary.csv`, and `multi_seed_retraining.json` at the run root after the main scoreboard completes.
+
 Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/model_comparison.csv`
 - `results/benchmark_YYYYMMDD_HHMMSS/dissertation_scoreboard.csv`, `dissertation_scoreboard.md`, and `dissertation_scoreboard.tex` — dissertation Table 8.2 style baseline scoreboard (F1-macro / F1-weighted, PR-AUC, MCC, balanced accuracy; Markdown/LaTeX bold best column values)
@@ -101,8 +124,10 @@ Expected output (filesystem):
 - `results/benchmark_YYYYMMDD_HHMMSS/confusion_matrix_best_model_normalized.png` — normalized by true label (rows sum to 1); best model by scoreboard; rows = True label, columns = Predicted label; class order Human, Bot
 - `results/benchmark_YYYYMMDD_HHMMSS/confusion_matrix_best_model_raw.png` — raw-count companion (same axes/order)
 - `results/benchmark_YYYYMMDD_HHMMSS/feature_importance.csv` — raw per-model feature importances
-- `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` - runtime, dataset, package, git, and artifact provenance
-- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata (includes per-model `hpo` audit when tuning ran)
+- `results/benchmark_YYYYMMDD_HHMMSS/run_metadata.json` — invocation (`command_tokens`, `command`, `cwd`), `runtime` (stages + total seconds), `hardware`, `packages`, `environment` (`environment_freeze.txt` + SHA-256), optional `multi_seed` when `--multi-seed-retraining`
+- `results/benchmark_YYYYMMDD_HHMMSS/environment_freeze.txt` — `pip freeze --all` snapshot for this run’s interpreter
+- `results/benchmark_YYYYMMDD_HHMMSS/multi_seed_retraining.csv`, `multi_seed_summary.csv`, `multi_seed_retraining.json` — optional; per-seed metrics and aggregates when multi-seed retraining is enabled (distinct from bootstrap CIs, which resample a **single** trained model’s predictions)
+- `results/benchmark_YYYYMMDD_HHMMSS/results.json` — structured benchmark export contract with ranking metadata (includes per-model `hpo` audit when tuning ran; TabNet entries may include `runtime_metadata` with requested vs actual device)
 - `results/benchmark_YYYYMMDD_HHMMSS/hpo_summary.json` — cache hit vs fresh study, trial counts, best `val_f1`, artifact paths
 - `results/hpo_cache/<model>/<signature>.json` — persisted `HPOResultV1` for reuse when the run signature matches
 - `results/benchmark_YYYYMMDD_HHMMSS/metric_confidence_intervals.csv` — 95% bootstrap CIs per model/metric
@@ -156,10 +181,16 @@ Options:
 - `--robustness-analysis`: enable the optional adversarial robustness audit
 - `--robustness-profiles`: override the default profiles (`cheap_only realistic_mixed`)
 - `--frs-model`, `--frs-shap-top-k`, `--frs-ablation-top-ks`: applied when robustness is enabled (CLI or `robustness.enabled: true` in config); tune FRS / SHAP stability / ablation for that run
+- `--multi-seed-retraining`: after the main benchmark, retrain only the top-K scoreboard models (default K=3 from config) for each `--multi-seed-values` seed without rerunning HPO
+- `--multi-seed-values INT...`: random seeds for those retrains (default in config: 2112–2116)
+- `--multi-seed-top-k INT`: override top-K (default 3)
+- `--seeds INT [INT ...]`: multi-seed mode (minimum three unique integers); see multi-seed training section above
 
 Outputs are saved under `results/benchmark_YYYYMMDD_HHMMSS/`.
 
 **Metric note:** HPO maximises **validation F1** (`val_f1`). The printed `[BEST]` benchmark line still ranks models by **test F1** (existing `get_best_model('f1')` default).
+
+**Bootstrap vs multi-seed:** metric confidence intervals and pairwise tests use **bootstrap resampling** of predictions from the models trained in that run (not separate retrains). `--seeds` runs a **full** independent benchmark per seed and aggregates mean ± std at the parent. `--multi-seed-retraining` runs **new fits** per seed for only the top scoreboard models to report seed-to-seed metric dispersion without rerunning HPO.
 
 **Threshold note:** `--threshold-analysis` does not retrain models and does not change the headline benchmark ranking. It compares the current `model.predict()` operating point with validation-selected probability thresholds, then reports those thresholds on the held-out test split to diagnose precision-recall trade-offs.
 

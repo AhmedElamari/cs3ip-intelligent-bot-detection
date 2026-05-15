@@ -138,6 +138,41 @@ class TabNetModel(BaseModel):
     def supports_feature_importance(self) -> bool:
         return True
 
+    def get_runtime_metadata(self) -> Dict[str, Any]:
+        """Return requested vs actual compute device after fit (TabNet / PyTorch)."""
+        requested = str(self._params.get("device_name", "auto"))
+        out: Dict[str, Any] = {
+            "requested_device": requested,
+            "actual_device": None,
+            "cuda_available": None,
+        }
+        try:
+            import torch
+
+            out["cuda_available"] = bool(torch.cuda.is_available())
+        except ImportError:
+            out["cuda_available"] = None
+
+        if self.model is None:
+            return out
+
+        try:
+            network = getattr(self.model, "network", None)
+            if network is not None:
+                param = next(network.parameters(), None)
+                if param is not None:
+                    out["actual_device"] = str(param.device)
+                    return out
+        except (StopIteration, RuntimeError, AttributeError):
+            pass
+
+        if out["actual_device"] is None:
+            if requested == "auto":
+                out["actual_device"] = "cuda" if out["cuda_available"] else "cpu"
+            else:
+                out["actual_device"] = requested
+        return out
+
     # ------------------------------------------------------------------
     # Eval-set hook for early stopping
     # ------------------------------------------------------------------

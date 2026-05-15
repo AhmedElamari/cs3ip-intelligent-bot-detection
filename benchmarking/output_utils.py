@@ -1,5 +1,7 @@
 """Output helpers for the benchmark pipeline: comparison tables, plots, and final results."""
+
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,6 +32,18 @@ DRIFT_SCOREBOARD_INTRO = (
     "Concept-drift test set: models trained on oldest accounts (chronological split over combined "
     "labelled data), validated on the middle window, evaluated on the newest window."
 )
+
+
+def _model_runtime_from_benchmark(benchmark: ModelBenchmark) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for name, res in benchmark.results.items():
+        model = res.get("model")
+        get_rt = getattr(model, "get_runtime_metadata", None) if model is not None else None
+        if callable(get_rt):
+            meta = get_rt()
+            if meta:
+                out[name] = meta
+    return out
 
 
 def _save_plot(fig, output_path: Path) -> None:
@@ -303,5 +317,7 @@ def save_final_outputs(
             output_dir,
             protocol_note=drift_protocol_note or DRIFT_SCOREBOARD_INTRO,
         )
+    meta_map = _model_runtime_from_benchmark(benchmark)
+    run_context.model_runtime_metadata = meta_map if meta_map else None
     metadata_path = write_run_metadata(run_context)
     print(f"Saved run metadata to {metadata_path}")

@@ -188,6 +188,15 @@ class Config:
                 },
             },
         },
+
+        'reproducibility': {
+            'multi_seed': {
+                'enabled': False,
+                'top_k': 3,
+                'seeds': [2112, 2113, 2114, 2115, 2116],
+                'rank_metric': 'scoreboard',
+            },
+        },
     }
     
     def __init__(self, config_dict: Dict[str, Any] = None):

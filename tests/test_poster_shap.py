@@ -3,6 +3,7 @@
 import sys
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -23,7 +24,7 @@ class PosterShapExportTest(unittest.TestCase):
         fake_shap = types.SimpleNamespace(
             summary_plot=lambda *_args, **_kwargs: plt.scatter([0, 1], [0, 1], s=10)
         )
-        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp, unittest.mock.patch.dict(
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp, mock.patch.dict(
             sys.modules, {"shap": fake_shap}
         ):
             output_dir = Path(tmp)
@@ -57,9 +58,9 @@ class PosterShapExportTest(unittest.TestCase):
         fake_shap = types.SimpleNamespace(
             summary_plot=lambda *_args, **_kwargs: plt.scatter([0, 1], [0, 1], s=10)
         )
-        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp, unittest.mock.patch.dict(
+        with TemporaryDirectory(dir=str(_REPO_ROOT)) as tmp, mock.patch.dict(
             sys.modules, {"shap": fake_shap}
-        ), unittest.mock.patch("matplotlib.pyplot.title") as mock_title:
+        ), mock.patch("matplotlib.pyplot.title") as mock_title:
             export_poster_shap(
                 np.array([[0.2, -0.1], [0.1, 0.3]]),
                 np.array([[1.0, 2.0], [3.0, 4.0]]),

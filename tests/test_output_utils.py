@@ -1,6 +1,7 @@
 """Tests for benchmark output utility helpers."""
 
 import ast
+import hashlib
 import io
 import importlib
 import json
@@ -54,6 +55,7 @@ def _make_benchmark(specs, experiment_name: str, seed: int = 2112, *, interpreta
             "val_metrics": {},
             "test_metrics": tm,
             "feature_importance": None,
+            "runtime_metadata": None,
             "is_interpretable": interpretable(name),
             "X_train": None,
             "X_val": None,
@@ -200,7 +202,45 @@ class _FinalOutputStubWithScoreboard(_FinalOutputStub):
     }
 
 
+def _fake_environment_freeze(output_dir: Path) -> dict:
+    path = Path(output_dir) / "environment_freeze.txt"
+    path.write_text("pytest-fake==0\n", encoding="utf-8")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    return {"file": "environment_freeze.txt", "sha256": digest, "error": None}
+
+
 class OutputUtilsTest(unittest.TestCase):
+    def setUp(self):
+        self._run_meta_patchers = []
+        patchers = (
+            mock.patch(
+                "benchmarking.run_metadata.write_environment_freeze",
+                side_effect=_fake_environment_freeze,
+            ),
+            mock.patch(
+                "benchmarking.run_metadata._hardware_metadata",
+                return_value={
+                    "processor": None,
+                    "cpu_count_logical": 4,
+                    "memory_total_bytes": None,
+                    "torch_version": None,
+                    "cuda_available": None,
+                    "cuda_version": None,
+                    "cudnn_version": None,
+                    "gpus": [],
+                    "warnings": [],
+                },
+            ),
+        )
+        for p in patchers:
+            p.start()
+            self._run_meta_patchers.append(p)
+
+    def tearDown(self):
+        for p in reversed(self._run_meta_patchers):
+            p.stop()
+        self._run_meta_patchers.clear()
+
     def _caption_case(
         self,
         *,
@@ -325,6 +365,12 @@ class OutputUtilsTest(unittest.TestCase):
             self.assertIn("pr_curves_comparison.png", metadata["artifacts"]["files"])
             self.assertIn("confusion_matrix_best_model_normalized.png", metadata["artifacts"]["files"])
             self.assertIn("confusion_matrix_best_model_raw.png", metadata["artifacts"]["files"])
+            self.assertIn("environment_freeze.txt", metadata["artifacts"]["files"])
+            self.assertIn("hardware", metadata)
+            self.assertIn("command_tokens", metadata["invocation"])
+            self.assertIn("command", metadata["invocation"])
+            self.assertEqual(metadata["environment"]["file"], "environment_freeze.txt")
+            self.assertIsNotNone(metadata["environment"]["sha256"])
 
     def test_save_final_outputs_writes_dissertation_scoreboard(self):
         save_final_outputs = _output_utils().save_final_outputs
