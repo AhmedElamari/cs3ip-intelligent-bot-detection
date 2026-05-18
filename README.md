@@ -31,7 +31,8 @@ cs3ip-intelligent-bot-detection/
 |-- models/                       # Model implementations
 |-- benchmarking/                 # Benchmark runner, metrics, `hpo/` shared Optuna service
 |-- explainability/               # SHAP/LIME/feature importance tools
-|-- tests/                        # Smoke tests
+|-- tests/                        # Smoke tests (unittest)
+|-- e2e/                          # Playwright E2E for the Streamlit VIVA demo (`requirements-e2e.txt`)
 |-- results/                      # Generated outputs (gitignored)
 ```
 
@@ -40,6 +41,43 @@ Recommended:
 ```bash
 pip install -r requirements.txt
 ```
+
+**Streamlit VIVA demo (optional):** after installing `requirements.txt`, bake demo assets once (official train split + cached Optuna RF), then run from the repo root:
+
+```bash
+python -m streamlit_demo.bake_live_artifact --train-split-dir data --out demo_assets/live_predictor.joblib
+python run_benchmark.py --models random_forest --explain --skip-statistics
+# copy results/benchmark_<timestamp>/shap_summary_random_forest.png to demo_assets/ if missing
+python -m streamlit run app.py
+```
+
+If `data/train.json` is absent, pass `--data` / `--labels` to `bake_live_artifact` per its `--help`.
+
+**Playwright E2E for that demo:** install extra deps and Chromium once, then:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-e2e.txt
+playwright install chromium
+pytest e2e/ -m e2e -v
+```
+
+This starts a temporary Streamlit server and asserts each tab renders, Tab 3 keeps a narrower left column than right, the gauge appears after **Run prediction**, and (in `test_live_tab_adheres_to_denser_layout_spec`) computed layout matches the denser Tab 3 CSS contract.
+
+**Trace Viewer (see the UI frame-by-frame with screenshots):** record a trace for every test, then open it in Playwright’s Trace Viewer (timeline + DOM + screenshots):
+
+```bash
+pytest e2e/ -m e2e -v --tracing=on --screenshot=on
+playwright show-trace test-results/*/trace.zip
+```
+
+On Windows PowerShell, pick the newest trace explicitly:
+
+```powershell
+playwright show-trace (Get-ChildItem -Recurse test-results -Filter trace.zip | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+```
+
+For CI-sized artifacts, use **`--tracing=retain-on-failure`** instead of `on` (trace only when a test fails). Traces and screenshots land under **`test-results/`** (gitignored).
 
 Minimum:
 ```bash
