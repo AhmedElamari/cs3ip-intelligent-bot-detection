@@ -116,7 +116,10 @@ def _resilience_table_html(rows: Sequence[tuple[str, str, float, str]]) -> str:
 
 
 def _aside_html(top_three: Sequence[str]) -> str:
-    a, b, c = top_three
+    names = list(top_three)
+    while len(names) < 3:
+        names.append("\u2014")
+    a, b, c = names[:3]
     return (
         '<div class="demo-aside-column">'
         '<div class="demo-aside-note">'

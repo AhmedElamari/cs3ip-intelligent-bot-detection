@@ -1,0 +1,18 @@
+{
+  "schema_version": "HPOResultV1",
+  "status": "ok",
+  "best_params": {
+    "n_estimators": 289,
+    "max_depth": 12,
+    "min_samples_split": 20,
+    "min_samples_leaf": 3,
+    "max_features": "log2"
+  },
+  "best_score": 0.8466957396846696,
+  "trial_count": 20,
+  "metric": "val_f1",
+  "seed": 2112,
+  "warnings": [],
+  "model_name": "random_forest",
+  "search_space_version": "v1"
+}

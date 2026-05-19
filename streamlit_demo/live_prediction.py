@@ -478,6 +478,10 @@ def live_header_status(pred: LivePredictor | None, source: str) -> str:
     return "Demo"
 
 
+def live_header_hint_from_path(path: Path) -> str:
+    return "Model loaded" if path.is_file() else "Demo"
+
+
 def render_live_prediction(
     predictor_path: Path,
     *,
@@ -496,7 +500,7 @@ def render_live_prediction(
     if "live_last_contribs" not in st.session_state:
         st.session_state.live_last_contribs = []
 
-    pred, _ = (
+    pred, source = (
         bundle
         if bundle is not None
         else cached_live_predictor(str(predictor_path.resolve()))
@@ -592,7 +596,7 @@ def render_live_prediction(
         st.session_state.live_last_contribs = list(contribs.items())
 
     with col_right:
-        if pred is None:
+        if pred is None and source == "error":
             st.markdown(
                 build_artifact_missing_html("demo_assets/live_predictor.joblib"),
                 unsafe_allow_html=True,

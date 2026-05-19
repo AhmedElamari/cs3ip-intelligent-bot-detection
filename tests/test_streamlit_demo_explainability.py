@@ -7,6 +7,7 @@ import unittest
 from streamlit_demo.data import FEATURE_IMPORTANCE_ROWS, RESILIENCE_ROWS, SHAP_SUMMARY_RF_PATH
 from streamlit_demo.explainability import (
     SHAP_SUMMARY_FILENAME,
+    _aside_html,
     build_explainability_html,
     build_shap_placeholder_html,
     format_resilience_rows,
@@ -57,6 +58,11 @@ class ExplainabilityHelpersTest(unittest.TestCase):
         lowered = html.lower()
         self.assertNotIn("plotly", lowered)
         self.assertNotIn("canvas", lowered)
+
+    def test_aside_html_pads_short_top_three(self) -> None:
+        html = _aside_html(["is_verified"])
+        self.assertIn("is_verified", html)
+        self.assertIn("demo-aside-note", html)
 
     def test_shap_image_branch_uses_img_tag(self) -> None:
         src = str(SHAP_SUMMARY_RF_PATH).replace("\\", "/")

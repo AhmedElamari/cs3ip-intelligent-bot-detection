@@ -113,6 +113,12 @@ def build_model_arena_html(
     *,
     footnote_html: str = "",
 ) -> str:
+    if not rows:
+        return (
+            '<div class="demo-arena-empty">'
+            "<p>No benchmark rows available for this snapshot.</p>"
+            "</div>"
+        )
     best = compute_best_per_metric(rows)
     champ = _champion_row(rows)
     if champ is None:

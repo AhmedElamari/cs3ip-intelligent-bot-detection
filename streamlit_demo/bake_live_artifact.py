@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import numbers
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,39 @@ from Preprocessing import BotDetector
 
 _SCHEMA = "LivePredictorV1"
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_HPO_JSON = _REPO_ROOT / "demo_assets" / "rf_hpo_defaults.json"
+
+
+def _normalize_label_value(value: Any) -> int | None:
+    """Match DataLoader embedded-label rules (0/1, bot/human strings)."""
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in ("0", "1"):
+            return int(normalized)
+        if normalized in ("bot", "fake"):
+            return 1
+        if normalized in ("human", "real"):
+            return 0
+        numeric = pd.to_numeric(normalized, errors="coerce")
+        if numeric in (0, 1):
+            return int(numeric)
+        return None
+    if isinstance(value, numbers.Integral):
+        return int(value) if value in (0, 1) else None
+    if isinstance(value, numbers.Real):
+        if value in (0, 1) and float(value).is_integer():
+            return int(value)
+    return None
+
+
+def _normalize_label_column(series: pd.Series) -> pd.Series:
+    mapped = series.map(_normalize_label_value)
+    if mapped.isna().any():
+        bad = int(mapped.isna().sum())
+        raise ValueError(f"{bad} label value(s) could not be normalized to 0/1.")
+    return mapped.astype(int)
 
 def _merge_labels(df: pd.DataFrame, labels_path: Path) -> pd.DataFrame:
     lab = pd.read_csv(labels_path)
@@ -91,6 +126,32 @@ def _load_hpo_bundle(hpo_json: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     return _sklearn_rf_kwargs(bp, random_state=int(raw.get("seed", 2112))), provenance
 
 
+def _resolve_rf_kwargs(
+    hpo_json: Path | None,
+    random_state: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    hpo_path = hpo_json or _DEFAULT_HPO_JSON
+    if hpo_path.is_file():
+        return _load_hpo_bundle(hpo_path)
+    from config import load_config
+
+    print(
+        f"Warning: HPO JSON not found at {hpo_path}; using config random_forest defaults.",
+        file=sys.stderr,
+    )
+    cfg = load_config()
+    params = dict(cfg.get("models.random_forest.params") or {})
+    params["random_state"] = random_state
+    provenance = {
+        "hpo_artifact_relpath": "(config defaults)",
+        "best_val_f1": None,
+        "trial_count": 0,
+        "metric": "config",
+        "search_space_version": None,
+    }
+    return _sklearn_rf_kwargs(params, random_state=random_state), provenance
+
+
 def bake(
     out_path: Path,
     *,
@@ -129,14 +190,10 @@ def bake(
     train_df = train_df.dropna(subset=["label"])
     if train_df.empty:
         raise ValueError("No labeled training rows.")
+    train_df = train_df.copy()
+    train_df["label"] = _normalize_label_column(train_df["label"])
 
-    hpo_path = hpo_json or (
-        _REPO_ROOT / "results/hpo_cache/random_forest"
-        / "e076c10b28698ab7ae24b52bbf79b89fbc22d4a1286ea8db8d5bdcf91529162f.json"
-    )
-    if not hpo_path.is_file():
-        raise FileNotFoundError(f"HPO JSON not found: {hpo_path}")
-    rf_kwargs, hpo_meta = _load_hpo_bundle(hpo_path)
+    rf_kwargs, hpo_meta = _resolve_rf_kwargs(hpo_json, random_state)
     rf_kwargs["random_state"] = random_state
 
     reference_date = derive_reference_date(train_df)
@@ -201,7 +258,7 @@ def main() -> None:
         "--hpo-json",
         type=Path,
         default=None,
-        help="HPOResultV1 JSON for Random Forest (default: repo cached RF study).",
+        help="HPOResultV1 JSON for Random Forest (default: demo_assets/rf_hpo_defaults.json).",
     )
     p.add_argument(
         "--benchmark-xai-rel",

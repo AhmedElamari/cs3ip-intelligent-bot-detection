@@ -59,6 +59,11 @@ class ModelArenaHelpersTest(unittest.TestCase):
             ("f1", "pr_auc", "roc_auc", "mcc", "train_seconds"),
         )
 
+    def test_empty_rows_returns_message_html(self) -> None:
+        html = build_model_arena_html([], DEMO_DATASET_META)
+        self.assertIn("demo-arena-empty", html)
+        self.assertIn("No benchmark rows", html)
+
 
 if __name__ == "__main__":
     unittest.main()
