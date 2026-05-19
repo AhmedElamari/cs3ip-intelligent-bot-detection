@@ -1,4 +1,4 @@
-"""Streamlit entry: VIVA demo (Tabs 1-3, query-param navigation)."""
+"""VIVA Streamlit demo — loads baked artifacts (streamlit_demo/), no live retraining."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ def main() -> None:
         initial_sidebar_state="collapsed",
     )
     apply_theme(st)
+    # Query-param tabs (arena / explainability / live) — bookmarkable for VIVA walkthrough.
     tab = active_tab_from_session(st)
     if tab == "live":
         live_bundle = cached_live_predictor(str(LIVE_PREDICTOR_JOBLIB_PATH.resolve()))

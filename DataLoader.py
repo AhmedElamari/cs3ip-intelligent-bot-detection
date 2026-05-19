@@ -12,14 +12,15 @@ __all__ = [
 
 
 class TwiBotDataLoader:
-    """Load and flatten TwiBot-20 JSON dataset into a pandas DataFrame.
-    
-    Intended for JSON files with embedded labels, used via train/dev/test splits.
+    """Load and flatten TwiBot-20 JSON into tabular rows for sklearn pipelines.
+
+    Nested profile/neighbor/tweet JSON is flattened so downstream stages see
+    interpretable behavioural/metadata columns (not graph embeddings).
     """
 
     TWITTER_DATE_FORMAT = "%a %b %d %H:%M:%S %z %Y"
 
-    # Mapping from TwiBot-20 JSON fields to expected column names
+    # Align TwiBot field names with pipeline time-split / age features.
     FIELD_MAPPING = {
         'created_at': 'account_creation_date',
         'verified': 'is_verified',
@@ -185,11 +186,10 @@ class TwiBotDataLoader:
         else:
             flat['domain'] = domain
 
-        # Extract tweet count from tweet list
+        # Compress graph structure to counts — interpretable, no GNN in this pipeline.
         tweets = user.get('tweet') or []
         flat['tweet_count'] = len(tweets) if tweets else 0
 
-        # Extract neighbor counts
         neighbor = user.get('neighbor') or {}
         flat['following_sample_count'] = len(neighbor.get('following', []) or [])
         flat['follower_sample_count'] = len(neighbor.get('follower', []) or [])

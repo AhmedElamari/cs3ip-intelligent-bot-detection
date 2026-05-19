@@ -1,4 +1,4 @@
-"""Training helpers for ``main.py`` (``train_and_evaluate``)."""
+"""Single-model train/eval for main.py; benchmark uses ModelBenchmark instead."""
 
 import numpy as np
 from typing import Any, Dict, List, Optional
@@ -43,7 +43,7 @@ def train_and_evaluate(
     model_params: Optional[Dict[str, Any]] = None,
     config: Optional[Config] = None,
 ) -> Dict[str, Any]:
-    """Fit ``model_type`` (binary labels) and return metrics plus fitted wrapper."""
+    """Fit on train; report val then test — test is final held-out evidence."""
     _validate_binary_labels(y_train, y_val, y_test)
 
     if model_type not in ("random_forest", "logistic_regression", "svm", "tabnet"):
@@ -74,6 +74,7 @@ def train_and_evaluate(
         tabnet_meta=prep.tabnet_meta,
     )
 
+    # TabNet early stopping uses val only — test labels never enter training.
     if hasattr(model, "prepare_eval_set"):
         model.prepare_eval_set(prep.X_val, y_val)
 

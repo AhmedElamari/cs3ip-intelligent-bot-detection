@@ -1,4 +1,4 @@
-"""Chronological concept-drift splits and delta tables for benchmark outputs."""
+"""Concept-drift protocol: re-order TwiBot splits by time; delta vs baseline scoreboard."""
 
 from __future__ import annotations
 

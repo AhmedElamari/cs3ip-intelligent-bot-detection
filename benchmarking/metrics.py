@@ -1,4 +1,4 @@
-"""Metrics calculator: point estimates, bootstrap CIs, paired delta test, McNemar, Holm-Bonferroni."""
+"""Imbalance-aware metrics + bootstrap CIs + paired tests (accuracy alone is insufficient)."""
 
 from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
@@ -11,7 +11,7 @@ from sklearn.metrics import (
 
 
 class MetricsCalculator:
-    """Metrics for bot detection: accuracy, F1, ROC-AUC, PR-AUC, MCC, bootstrap CIs, McNemar, Holm-Bonferroni."""
+    """Headline metrics for bots: F1, PR-AUC, MCC; inferential layer for model comparison."""
     
     METRIC_DESCRIPTIONS = {
         'accuracy': 'Overall correctness of predictions',
@@ -46,7 +46,7 @@ class MetricsCalculator:
         n_bootstrap: int,
         y_true: np.ndarray,
     ):
-        """Yield bootstrap indices where both classes appear in the resample."""
+        """Skip single-class resamples — AUC/F1 are undefined on one class."""
         for _ in range(n_bootstrap):
             idx = rng.randint(0, n, n)
             if len(np.unique(y_true[idx])) >= 2:

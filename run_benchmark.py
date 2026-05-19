@@ -1,12 +1,7 @@
 """
-Bot Detection Benchmark Pipeline
-================================
-CLI entry point for multi-model benchmarking with XAI analysis.
+Multi-model benchmark CLI: HPO, scoreboard, stats, XAI, robustness, drift.
 
-Usage:
-    python run_benchmark.py
-    python run_benchmark.py --config config/config.yaml
-    python run_benchmark.py --explain
+Use main.py for a single-model path. --dissertation-core trims slow auxiliaries.
 """
 
 import argparse
@@ -68,6 +63,7 @@ def _balanced_class_weights(y: np.ndarray) -> dict[int, float]:
 
 
 def _reset_model_params_to_base(tuned: Config, base: Config) -> None:
+    # Concept-drift run retunes on temporal splits — don't reuse random-split HPO params.
     for name in tuned.get('models', {}):
         params = base.get(f'models.{name}.params')
         if params is not None:
@@ -205,6 +201,7 @@ def _run_single_benchmark_pipeline(
 
     drift_benchmark = None
     drift_protocol_note = ""
+    # Second benchmark: oldest→train, newest→test (deployment drift / O6).
     if include_concept_drift and cfg.get('concept_drift.enabled'):
         drift_cfg = copy.deepcopy(cfg)
         _reset_model_params_to_base(drift_cfg, config_before_hpo)

@@ -1,4 +1,4 @@
-"""Multi-seed utilities: --seeds aggregation and optional top-model retraining."""
+"""Seed sensitivity (init randomness) — distinct from bootstrap sampling uncertainty."""
 
 from __future__ import annotations
 

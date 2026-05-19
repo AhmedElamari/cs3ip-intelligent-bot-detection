@@ -1,4 +1,4 @@
-"""HPO cache signature (SHA-256) and atomic JSON writes."""
+"""HPO cache invalidates when data fingerprint, features, or search space change."""
 from __future__ import annotations
 
 import hashlib

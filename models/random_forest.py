@@ -51,7 +51,8 @@ class RandomForestModel(BaseModel):
     
     @property
     def is_interpretable(self) -> bool:
-        return False  # Ensemble is not directly interpretable
+        # Importances ≠ auditable path; ensemble vote hides individual rules.
+        return False
     
     @property
     def supports_feature_importance(self) -> bool:

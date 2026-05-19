@@ -8,7 +8,7 @@ from sklearn.feature_selection import SelectKBest, mutual_info_classif
 
 class BotDetector:
     def __init__(self, random_state: int = 2112):
-        """Initialize preprocessing helpers."""
+        """Stateful scaler/selector — callers must fit on train, transform eval splits."""
         self.random_state = int(random_state)
         self.data = None
         self.scaler = StandardScaler()
@@ -16,7 +16,7 @@ class BotDetector:
         self.feature_selector = None
 
     def preprocess(self) -> pd.DataFrame:
-        """Clean and preprocess data from TwiBot-20"""
+        """Drop unlabeled rows; impute sparse TwiBot fields (no label invention)."""
         self.data = self.data.dropna(subset=['label'])
         num_cols = self.data.select_dtypes(include='number').columns
         self.data[num_cols] = self.data[num_cols].fillna(0)
@@ -26,14 +26,14 @@ class BotDetector:
         return self.data
 
     def scale_features(self, X_train, X_val, X_test):
-        """Apply StandardScaler for Logistic Regression and SVM models"""
+        """Fit scaler on train only — val/test must not influence mean/variance."""
         X_train_scaled = self.scaler.fit_transform(X_train)
         X_val_scaled = self.scaler.transform(X_val)
         X_test_scaled = self.scaler.transform(X_test)
         return X_train_scaled, X_val_scaled, X_test_scaled
 
     def handle_imbalance(self, X_train, y_train, method: str = 'smote'):
-        """Handle class imbalance in bot detection datasets"""
+        """Synthetic/undersampled rows for training only (never val/test)."""
         if method == 'smote':
             try:
                 from imblearn.over_sampling import SMOTE
@@ -56,7 +56,7 @@ class BotDetector:
         return resampler.fit_resample(X_train, y_train)
 
     def select_features(self, X_train, y_train, k: int = 20):
-        """Select top k features using mutual information"""
+        """Mutual information — captures nonlinear relevance vs univariate F-test."""
         # Ensure k does not exceed number of features
         k = min(k, X_train.shape[1])
         score_fn = functools.partial(

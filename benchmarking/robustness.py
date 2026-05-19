@@ -1,4 +1,4 @@
-"""Optional adversarial robustness analysis for the benchmark pipeline."""
+"""Adversarial robustness (O5–O7): perturb true bots, flip rate, FRS, SHAP stability."""
 
 from __future__ import annotations
 
@@ -59,6 +59,7 @@ def _spearman_rho_pair(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def compute_frs(importance_norm: float, stability: float, flip_rate: Any) -> float:
+    # FRS (O7): importance × SHAP rank stability × (1 − evasion flip rate).
     fr = float(flip_rate) if flip_rate is not None and np.isfinite(flip_rate) else 0.0
     fr = min(1.0, max(0.0, fr))
     imp = float(importance_norm)

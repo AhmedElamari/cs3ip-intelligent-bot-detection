@@ -1,8 +1,7 @@
 """
-Configuration Management
-========================
-Centralized configuration for the bot detection pipeline.
-Supports YAML configuration files.
+Experiment contract: defaults for splits, models, XAI, HPO, robustness, outputs.
+
+Edit DEFAULTS or YAML overrides — random_state=2112 keeps runs reproducible.
 """
 
 from typing import Dict, Any, Optional
@@ -21,12 +20,12 @@ class Config:
         - Experiment tracking
     """
     
-    # Default configuration
+    # Default configuration — off-by-default flags are costly or need extra deps.
     DEFAULTS = {
         'random_state': 2112,
         'test_size': 0.1,
         'val_size': 0.2,
-        'time_split': False,  # Use chronological splitting to combat data drift
+        'time_split': False,  # Chronological re-split when True (see pipeline_utils).
 
         'concept_drift': {
             'enabled': False,
@@ -101,7 +100,7 @@ class Config:
                 }
             },
             'tabnet': {
-                # Disabled by default: requires `pip install -r requirements-dl.txt`
+                # Off by default — pytorch-tabnet is optional (requirements-dl.txt).
                 'enabled': False,
                 'params': {
                     'n_d': 32,
@@ -143,7 +142,7 @@ class Config:
         },
 
         'robustness': {
-            'enabled': False,
+            'enabled': False,  # Heavy: perturbation sweeps + FRS; enable for O5–O7 runs.
             'attack_population': 'true_bots',
             'profiles': ['cheap_only', 'realistic_mixed'],
             'evaluate_single_feature_attacks': True,
@@ -168,7 +167,7 @@ class Config:
         'hpo': {
             'enabled': True,
             'reuse_cache': True,
-            'metric': 'val_f1',
+            'metric': 'val_f1',  # Never tune on test labels.
             'fail_fast': True,
             'cache_dir': 'results/hpo_cache',
             'sampler_seed': 2112,

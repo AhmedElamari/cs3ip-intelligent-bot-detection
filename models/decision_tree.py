@@ -47,7 +47,7 @@ class DecisionTreeModel(BaseModel):
     
     @property
     def is_interpretable(self) -> bool:
-        return True
+        return True  # Single tree = explicit if/else rules (visualisable).
     
     @property
     def supports_feature_importance(self) -> bool:

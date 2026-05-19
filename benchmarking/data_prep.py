@@ -1,5 +1,5 @@
 """
-Data preparation helpers for the benchmark pipeline.
+Benchmark data prep: same leakage rules as main.py, driven by Config flags.
 """
 
 from pathlib import Path
@@ -90,6 +90,7 @@ def prepare_data(
     val_df = cleaned['val']
     test_df = cleaned['test']
 
+    # Concept-drift run: splits already chronological; anchor on full observation window.
     if temporal_protocol:
         reference_date = derive_reference_date(
             pd.concat([train_df, val_df, test_df], ignore_index=True)
@@ -180,14 +181,15 @@ def prepare_data(
         'label': test_df['label'].astype(int).values,
     })
 
+    # Resampling train only — SMOTE on val/test would invalidate evaluation.
     if config.get('preprocessing.handle_imbalance'):
         method = config.get('preprocessing.imbalance_method', 'smote')
         print(f"\nApplying {method.upper()} for class balancing...")
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method=method)
 
-    # Scaling is per-model in run_benchmark; config key preprocessing.scale_features toggles it.
+    # Scaling: per-model in ModelBenchmark (LR/SVM); trees/XGB/TabNet skip StandardScaler.
 
-    # Feature selection if configured
+    # Selector fit on train; val/test transformed with train statistics only.
     if config.get('preprocessing.feature_selection'):
         n_features = config.get('preprocessing.n_features', 20)
         print(f"\nSelecting top {n_features} features...")

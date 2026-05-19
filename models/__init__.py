@@ -23,7 +23,7 @@ __all__ = [
     'TabNetModel',
 ]
 
-# Model registry for easy access
+# Six-model interpretability–performance spectrum for dissertation Table 8.2.
 MODEL_REGISTRY = {
     'logistic_regression': LogisticRegressionModel,
     'svm': SVMModel,

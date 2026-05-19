@@ -6,7 +6,7 @@ import pandas as pd
 
 
 class LIMEExplainer:
-    """LIME-based explainer for bot detection; model-agnostic local explanations."""
+    """Local model-agnostic explanations — complements global SHAP importances."""
     
     def __init__(
         self,

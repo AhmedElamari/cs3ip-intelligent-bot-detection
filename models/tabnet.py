@@ -132,7 +132,7 @@ class TabNetModel(BaseModel):
 
     @property
     def is_interpretable(self) -> bool:
-        return True
+        return True  # Sequential attention masks = instance-wise sparse feature selection.
 
     @property
     def supports_feature_importance(self) -> bool:

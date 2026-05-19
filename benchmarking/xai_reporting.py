@@ -1,6 +1,4 @@
-"""
-XAI reporting helpers for the benchmark pipeline.
-"""
+"""Orchestrates SHAP/LIME/importance on model-specific prepared test inputs."""
 
 from pathlib import Path
 from typing import Any
@@ -78,7 +76,7 @@ def run_explainability_analysis(
             "negative toward Human (class 0)."
         )
 
-        # SHAP for tree-based models + TabNet (uses model-agnostic KernelExplainer path).
+        # RF/XGB/TabNet span interpretability spectrum; poster model defaults to XGBoost.
         poster_model = str(config.get('explainability.poster.model', 'xgboost'))
         target_models = list(dict.fromkeys(['random_forest', 'xgboost', 'tabnet', poster_model]))
 

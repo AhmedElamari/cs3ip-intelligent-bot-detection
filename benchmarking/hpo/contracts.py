@@ -1,4 +1,4 @@
-"""HPO result schema and registry entry."""
+"""Typed HPO handoff (HPOResultV1) — stable contract for agents and audit logs."""
 from __future__ import annotations
 
 import sys

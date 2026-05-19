@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 class SHAPExplainer:
-    """SHAP-based explainer for bot detection models."""
+    """SHAP: TreeExplainer for tree models; KernelExplainer for TabNet (cost trade-off)."""
     
     def __init__(self, model, feature_names: List[str] = None):
         """Initialize with trained model and optional feature names."""
@@ -25,11 +25,12 @@ class SHAPExplainer:
         return model
 
     def _create_explainer(self, shap, X_background):
-        """Select and build the appropriate SHAP explainer for the model type."""
+        """Route by model family — exact/fast trees vs slower model-agnostic TabNet."""
         name = type(self.model).__name__.lower()
         if any(kw in name for kw in ('tree', 'forest', 'gradient', 'xgb', 'lgbm', 'catboost')):
             return shap.TreeExplainer(self.model)
         if 'tabnet' in name:
+            # No native TreeExplainer for TabNet — KernelExplainer approximates SHAP.
             return shap.KernelExplainer(lambda x: self._raw_model.predict_proba(x), X_background)
         return shap.Explainer(self.model, X_background)
 
@@ -63,7 +64,7 @@ class SHAPExplainer:
         except ImportError:
             raise ImportError("SHAP not installed. Install with: pip install shap")
         
-        # Sample background data if too large
+        # Cap background for runtime; fixed seed for reproducible VIVA/demo runs.
         if len(X) > max_samples:
             if isinstance(X, pd.DataFrame):
                 X_background = X.sample(n=max_samples, random_state=2112)

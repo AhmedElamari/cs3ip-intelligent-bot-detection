@@ -1,8 +1,7 @@
 """
-Bot Detection Pipeline
-======================
-Main script to run the complete bot detection pipeline:
-JSON loading -> Feature engineering -> Preprocessing -> Model training -> Evaluation
+Single-model pipeline: TwiBot splits → features → preprocess → HPO → train/eval.
+
+Use run_benchmark.py for multi-model comparison, XAI, and robustness runs.
 """
 
 import argparse
@@ -183,18 +182,18 @@ def run_pipeline(
     
     # Post-processing steps
     
-    # Step 5: Handle class imbalance (optional)
+    # Train-only resampling — never balance val/test (would leak synthetic eval rows).
     if use_smote:
         print("\nApplying SMOTE for class balancing...")
         X_train, y_train = detector.handle_imbalance(X_train, y_train, method='smote')
         print(f"After SMOTE: {len(X_train)} training samples")
     
-    # Step 6: scaling (LR/SVM) inside train_and_evaluate when should_scale
+    # Distance-based models need scaling; trees/TabNet are scale-invariant here.
     should_scale = (use_scaling or model_type in ('logistic_regression', 'svm')) and model_type != 'tabnet'
     if should_scale:
         print("\nApplying feature scaling in training (LR/SVM).")
     
-    # Step 7: Feature selection (optional)
+    # MI selection fit on train; val/test see only selected columns.
     if num_features:
         print(f"\nSelecting top {num_features} features...")
         X_train = detector.select_features(X_train, y_train, k=num_features)
@@ -208,6 +207,7 @@ def run_pipeline(
 
     live_names = X_train.columns.tolist() if hasattr(X_train, 'columns') else feature_names
 
+    # HPO objective is val F1; test stays untouched until final train_and_evaluate.
     hpo_result, hpo_audit = resolve_hpo(
         model_type,
         cfg,

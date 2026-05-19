@@ -1,4 +1,4 @@
-"""Optuna HPO: optimize_model, resolve_hpo."""
+"""Optuna HPO on validation metric; cache keyed by data/config/search space."""
 from __future__ import annotations
 
 import warnings

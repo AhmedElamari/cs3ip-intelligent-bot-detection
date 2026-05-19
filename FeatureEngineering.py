@@ -4,7 +4,7 @@ from typing import Optional, List
 
 
 def derive_reference_date(train_df: pd.DataFrame) -> Optional[pd.Timestamp]:
-    """Derive a leakage-safe reference date from the training split."""
+    """Train-max creation date — age features must not use val/test future dates."""
     if 'account_creation_date' not in train_df.columns:
         return None
     account_creation = pd.to_datetime(
@@ -16,9 +16,9 @@ def derive_reference_date(train_df: pd.DataFrame) -> Optional[pd.Timestamp]:
 
 
 class BotFeatureExtractor:
-    """Extract features for bot detection from TwiBot-20 data."""
+    """Interpretable behavioural/metadata features (no embeddings) for bot detection."""
 
-    # Heuristic caps to limit extreme outliers consistently across splits.
+    # Caps stop a few extreme accounts dominating linear models and rate features.
     FOLLOWERS_FRIENDS_RATIO_CAP = 1000
     TWEETS_PER_DAY_CAP = 1000
     FAVOURITES_PER_DAY_CAP = 1000
@@ -26,7 +26,7 @@ class BotFeatureExtractor:
 
     def __init__(self, reference_date: Optional[pd.Timestamp] = None):
         self.feature_names: List[str] = []
-        # Optional fixed reference date for reproducible, leakage-free age features
+        # Same anchor for all splits — set by caller from train (or combined under time-split).
         self.reference_date = reference_date
 
     def extract_account_features(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -36,7 +36,7 @@ class BotFeatureExtractor:
         # Account age
         if 'account_creation_date' in df.columns:
             account_creation = pd.to_datetime(df['account_creation_date'], errors='coerce')
-            # Use a fixed or data-derived reference date to avoid data leakage
+            # Per-row max() would leak val/test timing into train features.
             reference_date = (
                 self.reference_date
                 if self.reference_date is not None
@@ -77,7 +77,7 @@ class BotFeatureExtractor:
                 df[column] = self._safe_to_numeric(df[column])
                 self.feature_names.append(column)
 
-        # Followers to friends ratio (important bot indicator)
+        # Classic bot heuristic: high followers/friends ratio (literature-backed signal).
         if {'followers_count', 'friends_count'}.issubset(df.columns):
             # Avoid division by zero and cap extreme values
             ratio = df['followers_count'] / (df['friends_count'] + 1)
@@ -167,6 +167,7 @@ class BotFeatureExtractor:
         """Extract all features in one call."""
         self.feature_names = []  # Reset feature names
 
+        # Order matters: derived rates need account_age_days from earlier steps.
         extractors = (
             self.extract_account_features,
             self.extract_activity_features,

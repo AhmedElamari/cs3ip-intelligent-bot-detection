@@ -51,13 +51,13 @@ class BaseModel(ABC):
     @property
     @abstractmethod
     def is_interpretable(self) -> bool:
-        """Return True if the model is inherently interpretable."""
+        """Human-auditable structure (coefficients, rules, masks) — not global importances."""
         pass
     
     @property
     @abstractmethod
     def supports_feature_importance(self) -> bool:
-        """Return True if the model provides feature importance scores."""
+        """Post-hoc or builtin importance vector — RF/XGB have this but are not 'interpretable'."""
         pass
     
     def set_params(self, **params) -> 'BaseModel':
@@ -135,10 +135,10 @@ class BaseModel(ABC):
         if hasattr(self.model, 'predict_proba'):
             return self.model.predict_proba(X)
         else:
-            # Fall back to decision function if available
+            # SVM without probability=True: approximate proba for ROC/threshold work only.
             if hasattr(self.model, 'decision_function'):
                 decision = self.model.decision_function(X)
-                # Convert to probability-like values using sigmoid
+                # Sigmoid maps decision scores to [0,1] — not calibrated Platt probabilities.
                 proba = 1 / (1 + np.exp(-decision))
                 return np.column_stack([1 - proba, proba])
             raise NotImplementedError(f"{self.name} does not support probability predictions")

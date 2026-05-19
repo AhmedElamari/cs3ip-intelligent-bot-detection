@@ -1,4 +1,4 @@
-"""Poster-sized SHAP beeswarm export (publication labels, high DPI)."""
+"""Dissertation poster SHAP — human-readable labels; explains held-out test subset."""
 
 from __future__ import annotations
 

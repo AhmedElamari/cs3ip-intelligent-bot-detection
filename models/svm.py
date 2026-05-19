@@ -37,7 +37,8 @@ class SVMModel(BaseModel):
             'C': kwargs.get('C', 1.0),
             'gamma': kwargs.get('gamma', 'scale'),
             'class_weight': kwargs.get('class_weight', 'balanced'),
-            'probability': kwargs.get('probability', True),  # Enable probability estimates
+            # Platt scaling: needed for ROC/PR/threshold analysis (costly but standard).
+            'probability': kwargs.get('probability', True),
         }
         self.model = self._create_model(**self._params)
     
@@ -46,12 +47,11 @@ class SVMModel(BaseModel):
     
     @property
     def is_interpretable(self) -> bool:
-        # Only linear kernel is somewhat interpretable
+        # RBF/poly are black-box; linear kernel ≈ weighted feature audit.
         return self._params.get('kernel') == 'linear'
     
     @property
     def supports_feature_importance(self) -> bool:
-        # Only linear kernel has direct feature importance via coefficients
         return self._params.get('kernel') == 'linear'
     
     def get_support_vector_count(self) -> int:

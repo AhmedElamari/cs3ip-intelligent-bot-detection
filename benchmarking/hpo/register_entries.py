@@ -13,6 +13,7 @@ SEARCH_SPACE_VERSION = "v1"
 
 
 def _val_f1_score(model: Any, X_val: np.ndarray, y_val: np.ndarray) -> float:
+    # HPO never optimizes test — val F1 is the selection objective.
     y_pred = model.predict(X_val)
     y_proba = (
         model.predict_proba(X_val) if hasattr(model, "predict_proba") else None

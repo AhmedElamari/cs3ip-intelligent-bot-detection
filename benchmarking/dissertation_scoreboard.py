@@ -1,4 +1,4 @@
-"""Dissertation Table 8.2: baseline scoreboard as CSV/Markdown/LaTeX."""
+"""Table 8.2 scoreboard — ranked by F1-Macro (both classes matter under imbalance)."""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ def build_scoreboard(benchmark: Any, dataset: str = "test") -> pd.DataFrame:
             line[disp] = tm.get(src, float("nan"))
         rows.append(line)
 
+    # Primary rank: F1-Macro; ROC-AUC tie-break (class-balanced headline for thesis).
     rows.sort(
         key=lambda r: (-_finite_sort(r["F1-Macro"]), -_finite_sort(r["ROC-AUC"]), str(r["Model"]))
     )

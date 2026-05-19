@@ -43,11 +43,10 @@ def time_stratified_split(
     random_state: int = 2112,
     min_samples_per_split: int = 1,
 ) -> tuple:
-    """Split data chronologically, then shuffle within each split.
-    
-    This approach helps combat data drift by training on older samples and
-    testing on newer ones, simulating real-world deployment where models
-    must generalize to future data.
+    """Chronological train/val/test, then shuffle inside each era.
+
+    Boundary is temporal (oldest→train, newest→test); within-split shuffle
+    keeps SGD/tree trainers from seeing strictly ordered mini-batches.
     
     Args:
         df: DataFrame containing the data to split
@@ -153,10 +152,11 @@ def apply_time_split_if_enabled(
     random_state: int = 2112,
     min_samples_per_split: int = 1,
 ) -> tuple:
-    """Apply time-stratified split and derive reference date when enabled."""
+    """Re-split on account_creation_date when enabled; return aligned reference_date."""
     from FeatureEngineering import derive_reference_date
 
     if use_time_split:
+        # Combined max date before split: no negative ages after chronological cut.
         combined = pd.concat([train_df, val_df, test_df], ignore_index=True)
         reference_date = derive_reference_date(combined)
         train_df, val_df, test_df = time_stratified_split(

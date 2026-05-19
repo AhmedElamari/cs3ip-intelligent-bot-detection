@@ -1,4 +1,4 @@
-"""Benchmarking system for comparing multiple bot detection models."""
+"""Multi-model benchmark: per-model prep, val/test metrics, optional inferential stats."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -42,7 +42,7 @@ class ModelBenchmarkConfig:
 
 @dataclass
 class ModelBenchmark:
-    """Benchmark multiple bot detection models; compare metrics, generate reports and plots."""
+    """Train each model on fairly prepared inputs; store val/test preds for stats/XAI."""
 
     def __init__(
         self,
@@ -129,6 +129,7 @@ class ModelBenchmark:
             if enable_scaling and name in ("logistic_regression", "svm") and verbose:
                 print("  (Applying feature scaling)")
 
+            # Same raw features, model-specific scaling/TabNet prep — fair comparison.
             prep = build_model_inputs(
                 name,
                 X_train,
@@ -148,6 +149,7 @@ class ModelBenchmark:
             if hasattr(model, "prepare_eval_set"):
                 model.prepare_eval_set(X_val_model, y_val)
 
+            # Val metrics inform model choice/HPO; test metrics are reported once here.
             start_time = time.time()
             model.fit(X_train_model, y_train, feature_names=fit_feature_names)
             training_time = time.time() - start_time

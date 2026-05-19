@@ -80,7 +80,7 @@ class XGBoostModel(BaseModel):
 
     @property
     def is_interpretable(self) -> bool:
-        return False
+        return False  # Strong nonlinear baseline; SHAP post-hoc, not intrinsic rules.
 
     @property
     def supports_feature_importance(self) -> bool:

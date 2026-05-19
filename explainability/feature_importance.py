@@ -18,18 +18,7 @@ def _importance_value(v: Any) -> float:
 
 
 class FeatureImportanceAnalyzer:
-    """
-    Unified feature importance analyzer for bot detection.
-    
-    Provides multiple methods to analyze feature importance:
-        - Model-specific importance (built-in feature_importances_)
-        - Permutation importance
-        - SHAP-based importance
-        - Statistical importance (correlation, mutual information)
-    
-    Also supports tracking feature importance over time to
-    understand how bot behavior evolves.
-    """
+    """Compare builtin vs permutation vs SHAP — they measure different things."""
     
     def __init__(self, feature_names: List[str] = None):
         """

@@ -1,4 +1,4 @@
-"""Per-model train/val/test prep (scaling, TabNetPrep, or pass-through)."""
+"""Fair per-model inputs: scale LR/SVM, TabNetPrep for TabNet, raw arrays for trees."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 
 from benchmarking.tabnet_prep import TabNetMeta, TabNetPrep
 
+# Trees/XGB/TabNet are scale-invariant; distance models need StandardScaler.
 SCALED_MODELS = frozenset({"logistic_regression", "svm"})
 
 

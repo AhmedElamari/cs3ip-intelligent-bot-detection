@@ -1,4 +1,4 @@
-"""Validation-selected threshold analysis for precision-recall trade-offs."""
+"""Thresholds chosen on val only; test rows report, never tune (anti-leakage)."""
 
 from __future__ import annotations
 

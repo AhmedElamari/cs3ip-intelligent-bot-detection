@@ -1,4 +1,4 @@
-"""Cost-aware feature perturbation helpers for robustness analysis."""
+"""Plausible bot evasion: cheap profile edits vs expensive follower/friend nudges."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class AttackResult:
 
 
 class RealisticPerturbationEngine:
-    """Apply realistic, cost-aware perturbations to engineered feature matrices."""
+    """Mutate only features a real account could change; recompute derived ratios/rates."""
 
     CHEAP_FEATURES = (
         'has_description',

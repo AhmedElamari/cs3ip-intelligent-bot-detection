@@ -1,4 +1,4 @@
-"""Helpers for benchmark run metadata."""
+"""Run provenance: dataset hashes, env freeze, argv — supports reproducibility claims."""
 
 from __future__ import annotations
 

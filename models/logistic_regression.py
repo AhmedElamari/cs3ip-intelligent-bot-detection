@@ -44,7 +44,7 @@ class LogisticRegressionModel(BaseModel):
     
     @property
     def is_interpretable(self) -> bool:
-        return True
+        return True  # Coefficients = direct bot/human odds direction per feature.
     
     @property
     def supports_feature_importance(self) -> bool:
