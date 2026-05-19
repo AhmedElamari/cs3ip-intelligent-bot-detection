@@ -9,12 +9,15 @@ results/
 data/
 *.json
 !config/*.json
+!demo_assets/rf_hpo_defaults.json
 
 .env
 .venv/
 venv/
 
 .pytest_cache/
+test-results/
+playwright-report/
 .mypy_cache/
 .ruff_cache/
 .ipynb_checkpoints/
@@ -24,7 +27,8 @@ AGENTS.md
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
-!.cursor/mcp.json
+mcp.json
+.cursor/mcp.json
 tasks/
 .vscode/
 debug-*.log
@@ -35,4 +39,3 @@ CITATION.cff
 LICENSE
 main_repro_appendix_working.tex
 .cursor/rules
-mcp.json

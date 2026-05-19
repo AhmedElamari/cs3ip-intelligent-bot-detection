@@ -1,0 +1,7 @@
+# Playwright E2E for the Streamlit VIVA demo only.
+# Prerequisite: pip install -r requirements.txt (Streamlit + app deps)
+# Then install browsers once: python -m playwright install chromium
+
+pytest>=8.0.0
+pytest-playwright>=0.5.0
+playwright>=1.49.0
