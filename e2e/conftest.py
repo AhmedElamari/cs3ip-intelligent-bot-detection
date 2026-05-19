@@ -81,8 +81,8 @@ def streamlit_base_url() -> Generator[str, None, None]:
             _wait_tcp(port, timeout_s=45.0)
             break
         except TimeoutError:
-            last_err = proc.stderr.read() if proc.stderr else ""
             _stop_streamlit(proc)
+            last_err = proc.stderr.read() if proc.stderr else ""
             proc = None
     if proc is None:
         raise TimeoutError(
