@@ -113,7 +113,8 @@ VISIBILITY_JS = """
   };
   const ok =
     checks.run_button &&
-    (toggles.length === 0 || checks.toggle_groups.every(Boolean)) &&
+    toggles.length >= 3 &&
+    checks.toggle_groups.every(Boolean) &&
     checks.no_page_scroll &&
     checks.desktop_no_row_scroll &&
     checks.verdict &&
@@ -123,6 +124,17 @@ VISIBILITY_JS = """
   return { ok, checks, vh: window.innerHeight, scrollH: document.documentElement.scrollHeight, wrapHeights };
 }
 """
+
+
+def wait_tcp(port: int, timeout_s: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.5)
+    raise TimeoutError(f"Nothing listening on 127.0.0.1:{port} after {timeout_s}s")
 
 
 def pick_port() -> int:
@@ -199,7 +211,7 @@ def main() -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    time.sleep(12)
+    wait_tcp(port)
     url = f"http://127.0.0.1:{port}"
     failed = False
     try:
@@ -212,7 +224,7 @@ def main() -> None:
             browser.close()
         for info in all_info:
             print(info)
-            if not info.get("ok") and info.get("viewport") == "1280x800":
+            if not info.get("ok"):
                 failed = True
         legacy = ROOT / "results" / "live_tab_debug.png"
         proof = ROOT / "results" / "live_tab_verify_pass.png"

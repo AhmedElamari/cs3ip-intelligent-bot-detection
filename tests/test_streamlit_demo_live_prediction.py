@@ -21,6 +21,7 @@ from streamlit_demo.live_prediction import (
     build_verdict_html,
     compute_derived_pair,
     format_derived_display,
+    live_header_hint_from_path,
     live_header_status,
     load_live_predictor,
 )
@@ -184,6 +185,12 @@ class ArtifactMissingTest(unittest.TestCase):
         self.assertIn("bake_live_artifact", b)
         self.assertIn("--train-split-dir data", b)
         self.assertIn("demo_assets/live_predictor.joblib", b)
+
+
+class LiveHeaderHintTest(unittest.TestCase):
+    def test_hint_from_path_without_loading_model(self) -> None:
+        missing = Path("/nonexistent/live_predictor.joblib")
+        self.assertEqual(live_header_hint_from_path(missing), "Demo")
 
 
 class LiveHeaderStatusTest(unittest.TestCase):

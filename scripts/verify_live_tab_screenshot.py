@@ -97,6 +97,7 @@ CHECK_JS = """
   const shapOk = afterRun ? shapNamesNotWrapped() : true;
   const ok =
     fullyVisible(btn) &&
+    toggles.length >= 3 &&
     toggles.every((t) => fullyVisible(t)) &&
     document.documentElement.scrollHeight <= window.innerHeight + 2 &&
     derivedClear &&

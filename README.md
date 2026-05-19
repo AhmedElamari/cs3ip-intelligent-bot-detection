@@ -46,8 +46,9 @@ pip install -r requirements.txt
 
 ```bash
 python -m streamlit_demo.bake_live_artifact --train-split-dir data --out demo_assets/live_predictor.joblib
+# optional: --hpo-json results/hpo_cache/random_forest/<hash>.json for exact repro
 python run_benchmark.py --models random_forest --explain --skip-statistics
-# copy results/benchmark_<timestamp>/shap_summary_random_forest.png to demo_assets/ if missing
+# copy shap_summary_random_forest.png to demo_assets/ when available
 python -m streamlit run app.py
 ```
 

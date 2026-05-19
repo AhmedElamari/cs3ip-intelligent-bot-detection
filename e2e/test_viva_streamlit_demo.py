@@ -8,6 +8,8 @@ import time
 import pytest
 from playwright.sync_api import Page, expect
 
+from streamlit_demo.data import SHAP_SUMMARY_RF_PATH
+
 
 pytestmark = pytest.mark.e2e
 
@@ -32,6 +34,10 @@ def test_explainability_tab(viva_page: Page, streamlit_base_url: str) -> None:
     expect(viva_page.get_by_text("Why did it predict", exact=False)).to_be_visible()
 
 
+@pytest.mark.skipif(
+    not SHAP_SUMMARY_RF_PATH.is_file(),
+    reason="demo_assets/shap_summary_random_forest.png not present (placeholder UI tested in unit tests)",
+)
 def test_explainability_shap_summary_image_present(viva_page: Page, streamlit_base_url: str) -> None:
     """When demo_assets/shap_summary_random_forest.png exists, Tab 2 must render it (not placeholder)."""
     viva_page.goto(f"{streamlit_base_url}/?tab=explainability", wait_until="commit")
@@ -308,13 +314,17 @@ def test_live_tab_run_button_fully_visible(viva_page: Page, streamlit_base_url: 
 
     before = _live_controls_fully_visible()
     assert before["run_button"], f"Run button clipped before run: {before}"
-    assert all(before["toggles"]), f"Toggle clipped before run: {before}"
+    assert len(before["toggles"]) >= 3 and all(before["toggles"]), (
+        f"Toggle clipped before run: {before}"
+    )
     assert before["no_page_scroll"], f"Page scrolls before run: {before}"
     run_btn.click()
     _locate_gauge_svg(viva_page)
     after = _live_controls_fully_visible()
     assert after["run_button"], f"Run button clipped after run: {after}"
-    assert all(after["toggles"]), f"Toggle clipped after run: {after}"
+    assert len(after["toggles"]) >= 3 and all(after["toggles"]), (
+        f"Toggle clipped after run: {after}"
+    )
     assert after["no_page_scroll"], f"Page scrolls after run: {after}"
 
 

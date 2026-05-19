@@ -95,6 +95,17 @@ def pick_port() -> int:
     return port
 
 
+def wait_tcp(port: int, timeout_s: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.5)
+    raise TimeoutError(f"Nothing listening on 127.0.0.1:{port} after {timeout_s}s")
+
+
 def wait_live_ready(page: Page) -> None:
     page.locator(".demo-topnav").wait_for(timeout=120_000)
     page.get_by_role("slider").first.wait_for(state="visible", timeout=90_000)
@@ -148,7 +159,7 @@ def run_capture(
     if after_run:
         ok = ok and info["gauge_present"] and info["verdict"] and info["shap"]
     else:
-        ok = ok and all(info["toggles"])
+        ok = ok and len(info["toggles"]) >= 3 and all(info["toggles"])
     if float(info.get("left_zoom", "1")) < 0.99:
         ok = False
         info["zoom_rejected"] = True
@@ -178,6 +189,9 @@ def main() -> int:
         else {s.strip() for s in args.viewports.split(",")}
     )
     viewports = [v for v in VIEWPORTS if v[0] in wanted]
+    if not viewports:
+        print("No matching viewports selected. Use --viewports=all or valid labels.")
+        return 1
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     proc = None
@@ -203,7 +217,7 @@ def main() -> int:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        time.sleep(12)
+        wait_tcp(port)
 
     results: list[dict] = []
     failed = False

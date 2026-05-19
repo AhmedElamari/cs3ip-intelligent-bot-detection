@@ -9,6 +9,7 @@ results/
 data/
 *.json
 !config/*.json
+!demo_assets/rf_hpo_defaults.json
 
 .env
 .venv/
@@ -26,7 +27,8 @@ AGENTS.md
 .cursor/*
 !.cursor/rules/
 !.cursor/rules/**
-!.cursor/mcp.json
+mcp.json
+.cursor/mcp.json
 tasks/
 .vscode/
 debug-*.log
@@ -37,4 +39,3 @@ CITATION.cff
 LICENSE
 main_repro_appendix_working.tex
 .cursor/rules
-mcp.json
