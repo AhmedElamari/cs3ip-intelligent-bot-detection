@@ -65,7 +65,6 @@ pytest e2e/ -m e2e -v
 
 This starts a temporary Streamlit server and asserts each tab renders, Tab 3 keeps a narrower left column than right, the gauge appears after **Run prediction**, and (in `test_live_tab_adheres_to_denser_layout_spec`) computed layout matches the denser Tab 3 CSS contract.
 
-**Trace Viewer (see the UI frame-by-frame with screenshots):** record a trace for every test, then open it in Playwright’s Trace Viewer (timeline + DOM + screenshots):
 
 ```bash
 pytest e2e/ -m e2e -v --tracing=on --screenshot=on
